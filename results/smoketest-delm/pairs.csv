@@ -1,0 +1,2 @@
+repo,task_id,feature_a,feature_b,setting,both_passed,clean_merge_passed,feature_a_passed,feature_b_passed,merge_status,merge_strategy,eval_error,n_agents,agents_at_step_limit,agents_errored,steps_total,cost_usd,duration_s,messages_sent,board_writes,notes,applies,apply_conflicts,waits,board_errors,patch_lines_total
+openai_tiktoken_task,0,4,8,coop,True,False,True,True,conflicts,solo-agent1,,2,0,0,53,0.157967,104.2,6,6,0,0,0,3,0,273

@@ -1,0 +1,9 @@
+[project]
+name = "delm-cb"
+version = "0.1.0"
+description = "Zero-invasion DeLM shared-context evaluation package for CooperBench"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "vendor/delm"]
+testpaths = ["tests"]

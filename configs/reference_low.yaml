@@ -1,0 +1,16 @@
+# Reference agent config, thinking level: low. Matches CooperBench/configs/reference/low.yaml.
+agent:
+  cost_limit: 40.0
+  step_limit: 500
+  compaction_token_trigger: 128000
+  step_counter: true
+
+environment:
+  container_timeout: "10h"
+
+model:
+  model_kwargs:
+    drop_params: true
+    thinkingConfig:
+      thinkingLevel: low
+      includeThoughts: true
