@@ -109,7 +109,13 @@ MIDPOINT_ARMS: tuple[MidpointArm, ...] = (
         model="vertex_ai/gemini-3.8-flash",
         thinking="medium",
         agent_config="configs/reference_medium.yaml",
-        baselines=(("`coop --git` ref", "coop-msa_v2-git-gemini-3-8-flash-core-ref"),),
+        baselines=(
+            ("`solo` ref", "solo-msa_v2-gemini-3-8-flash-core-ref"),
+            ("`coop --git` ref", "coop-msa_v2-git-gemini-3-8-flash-core-ref"),
+            ("`ref-intents`", "coop-msa_v2-git-gemini-3-8-flash-core-ref-intents"),
+            ("`ref-delivery-timing`", "coop-msa_v2-git-gemini-3-8-flash-core-ref-delivery-timing"),
+            ("`ref-comm-combined`", "coop-msa_v2-git-gemini-3-8-flash-core-ref-comm-combined"),
+        ),
     ),
     MidpointArm(
         run_name="flash-ref-delm",
@@ -118,8 +124,12 @@ MIDPOINT_ARMS: tuple[MidpointArm, ...] = (
         thinking="medium",
         agent_config="configs/reference_medium.yaml",
         baselines=(
+            ("`solo` ref", "solo-msa_v2-gemini-3-8-flash-flash-saturation-medium-128k-vertex"),
             ("`coop --git` ref #1", "coop-msa_v2-git-gemini-3-8-flash-flash-saturation-medium-128k-vertex"),
             ("`coop --git` ref #2", "coop-msa_v2-git-gemini-3-8-flash-flash-ref"),
+            ("`ref-intents`", "coop-msa_v2-git-gemini-3-8-flash-flash-ref-intents"),
+            ("`ref-delivery-timing`", "coop-msa_v2-git-gemini-3-8-flash-flash-ref-delivery-timing"),
+            ("`ref-comm-combined`", "coop-msa_v2-git-gemini-3-8-flash-flash-ref-comm-combined"),
         ),
     ),
     MidpointArm(
@@ -128,7 +138,11 @@ MIDPOINT_ARMS: tuple[MidpointArm, ...] = (
         model="vertex_ai/gemini-3.8-flash",
         thinking="low",
         agent_config="configs/reference_low.yaml",
-        baselines=(("`coop --git` ref-low", "coop-msa_v2-git-gemini-3-8-flash-flash-ref-low"),),
+        baselines=(
+            ("`solo` ref-low", "solo-msa_v2-gemini-3-8-flash-flash-ref-low"),
+            ("`coop --git` ref-low", "coop-msa_v2-git-gemini-3-8-flash-flash-ref-low"),
+            ("`ref-low-intents`", "coop-msa_v2-git-gemini-3-8-flash-flash-ref-low-intents"),
+        ),
     ),
     MidpointArm(
         run_name="3-flash-ref-low-delm",
@@ -136,7 +150,10 @@ MIDPOINT_ARMS: tuple[MidpointArm, ...] = (
         model="vertex_ai/gemini-3-flash-preview",
         thinking="low",
         agent_config="configs/reference_low.yaml",
-        baselines=(("`coop --git` 3-flash ref-low", "coop-msa_v2-git-gemini-3-flash-flash-ref-low"),),
+        baselines=(
+            ("`coop --git` 3-flash ref-low", "coop-msa_v2-git-gemini-3-flash-flash-ref-low"),
+            ("`3-flash ref-low + delivery-timing`", "coop-msa_v2-git-gemini-3-flash-flash-ref-low-delivery-timing"),
+        ),
     ),
 )
 

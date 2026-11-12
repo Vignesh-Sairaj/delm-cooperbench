@@ -194,7 +194,7 @@ class DelmMiniSweAgentV2Runner:
             try:
                 result = agent.run(task=task)
                 status = result.get("exit_status", "Submitted")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 status = "Error"
                 error_msg = str(exc)
             finally:
@@ -202,7 +202,7 @@ class DelmMiniSweAgentV2Runner:
 
             try:
                 patch = normalize_patch(git_connector.submitted_patch(env))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 patch = ""
 
             if agent._compaction_count > 0:

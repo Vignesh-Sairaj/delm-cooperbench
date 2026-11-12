@@ -24,9 +24,11 @@ from cooperbench.eval import evaluate
 from cooperbench.runner.coop import execute_coop
 from cooperbench.runner.tasks import discover_tasks
 
-import delm_cb.adapter  # noqa: F401 - registers "delm_msa_v2"
+from delm_cb.adapter import DelmMiniSweAgentV2Runner
 from delm_cb.board_runtime import BOARD_WRITE_ACTIONS, PairBoardRuntime
 from delm_cb.report import MIDPOINT_ARMS, MidpointArm, export_run, generate_midpoint_comparison
+
+_REGISTERED_RUNNER = DelmMiniSweAgentV2Runner
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 COOPERBENCH_ROOT = Path("/usr/local/google/home/vigneshsairaj/CooperBench")
@@ -134,7 +136,7 @@ def run_benchmark(
                 task_label = f"{task_info['repo']}/{task_info['task_id']}/{feat_str}"
                 try:
                     outcome = future.result()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     failed += 1
                     results_list.append({"task": task_label, "status": "error", "error": str(exc)})
                     print(f"[error] {task_label}: {exc}")
@@ -915,23 +917,39 @@ def _execute_arm_shards(
     needed_pp = f"{PACKAGE_ROOT / 'src'}:{PACKAGE_ROOT / 'vendor' / 'delm'}"
     env["PYTHONPATH"] = f"{needed_pp}:{existing_pp}" if existing_pp else needed_pp
 
-    procs: list[tuple[str, subprocess.Popen[str]]] = []
+    procs: list[tuple[dict[str, Any], subprocess.Popen[str]]] = []
     for entry in shard_commands:
         proc = subprocess.Popen(entry["cmd"], env=env)
-        procs.append((entry["shard_run"], proc))
+        procs.append((entry, proc))
 
-    failures: list[tuple[str, int]] = []
-    for shard_run, proc in procs:
+    retry_entries: list[dict[str, Any]] = []
+    for entry, proc in procs:
         rc = proc.wait()
         if rc != 0:
-            failures.append((shard_run, rc))
-    if failures:
-        raise RuntimeError(f"Shard failure(s) for {arm.run_name}: {failures}")
+            retry_entries.append(entry)
 
-    merge_shards(shard_runs=shard_run_names, logs_dir=logs_root, force=force)
-    evaluate_run(run_name=arm.run_name, concurrency=eval_concurrency, force=force, logs_dir=logs_root)
-    export_run(arm.run_name, logs_dir=logs_root, results_dir=results_root)
-    generate_midpoint_comparison(logs_dir=logs_root, results_dir=results_root)
+    if retry_entries:
+        print(f"[suite] Retrying {len(retry_entries)} failed shard(s) for {arm.run_name} once...")
+        retry_procs = [
+            (
+                entry["shard_run"],
+                subprocess.Popen([arg for arg in entry["cmd"] if arg != "--force"], env=env),
+            )
+            for entry in retry_entries
+        ]
+        failures = [(name, p.wait()) for name, p in retry_procs]
+        failures = [(name, rc) for name, rc in failures if rc != 0]
+        if failures:
+            print(f"[suite] ERROR: Shard failure(s) persisted for {arm.run_name}: {failures}")
+            return
+
+    try:
+        merge_shards(shard_runs=shard_run_names, logs_dir=logs_root, force=True)
+        evaluate_run(run_name=arm.run_name, concurrency=eval_concurrency, force=force, logs_dir=logs_root)
+        export_run(arm.run_name, logs_dir=logs_root, results_dir=results_root)
+        generate_midpoint_comparison(logs_dir=logs_root, results_dir=results_root)
+    except Exception as exc:
+        print(f"[suite] ERROR finalizing {arm.run_name}: {exc}")
 
 
 class _TeeStream:
