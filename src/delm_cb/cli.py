@@ -324,9 +324,15 @@ def merge_shards(
     ]
     parent_subset = SHARD_RE.sub("", str(launches[0].get("subset") or "")) or None
 
+    def _link_or_copy(src: str, dst: str) -> None:
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copyfile(src, dst)
+
     for d in dirs:
         if (d / setting).is_dir():
-            shutil.copytree(d / setting, out / setting, copy_function=os.link, dirs_exist_ok=True)
+            shutil.copytree(d / setting, out / setting, copy_function=_link_or_copy, dirs_exist_ok=True)
 
     config = {
         **configs[0],

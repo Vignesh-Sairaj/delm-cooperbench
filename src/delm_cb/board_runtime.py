@@ -147,9 +147,15 @@ class PairBoardRuntime:
             for rec_dir in self.records_dirs.values():
                 rec_dir.mkdir(parents=True, exist_ok=True)
                 rec_dir.chmod(0o777)
-                err_file = rec_dir / "context-command-errors.jsonl"
-                err_file.touch(exist_ok=True)
-                err_file.chmod(0o666)
+                for fname, init_text in (
+                    ("context-command-errors.jsonl", ""),
+                    ("context-validation-retries.json", "{}"),
+                    ("client-files.json", "{}"),
+                ):
+                    fpath = rec_dir / fname
+                    if not fpath.exists():
+                        fpath.write_text(init_text, encoding="utf-8")
+                    fpath.chmod(0o666)
 
             image = get_image_name(self.repo_name, self.task_id)
             self.original_files = OriginalFiles(image=image, workdir="/workspace/repo")

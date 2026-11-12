@@ -1,0 +1,58 @@
+{
+  "run_name": "core-ref-delm",
+  "setting": "coop",
+  "git_enabled": true,
+  "agent_framework": "delm_msa_v2",
+  "model": "vertex_ai/gemini-3.8-flash",
+  "subset": "core",
+  "concurrency": 2,
+  "key_slot": null,
+  "command": "/usr/local/google/home/vigneshsairaj/cs329z/paper-video/src/delm_cb/cli.py run -n core-ref-delm-shard1of4 -s core-shard1of4 -m vertex_ai/gemini-3.8-flash --agent-config /usr/local/google/home/vigneshsairaj/cs329z/paper-video/configs/reference_medium.yaml -c 2 --key-slot 1 --dataset-dir /usr/local/google/home/vigneshsairaj/cs329z/paper-video/_shards/core-shard1of4 --logs-dir /usr/local/google/home/vigneshsairaj/cs329z/paper-video/logs --results-dir /usr/local/google/home/vigneshsairaj/cs329z/paper-video/results --no-auto-eval",
+  "git_commit": "caba4749ba4364bfbdc9af90e71c02a1f2dc1cf8",
+  "git_dirty": false,
+  "agent_config_path": "/usr/local/google/home/vigneshsairaj/cs329z/paper-video/configs/reference_medium.yaml",
+  "agent_config": "# Reference agent config, thinking level: medium. Matches CooperBench/configs/reference/medium.yaml.\nagent:\n  cost_limit: 40.0\n  step_limit: 500\n  compaction_token_trigger: 128000\n  step_counter: true\n\nenvironment:\n  container_timeout: \"10h\"\n\nmodel:\n  model_kwargs:\n    drop_params: true\n    thinkingConfig:\n      thinkingLevel: medium\n      includeThoughts: true\n",
+  "budgets": {
+    "step_limit": 500,
+    "compaction_token_trigger": 128000,
+    "thinking_level": "medium"
+  },
+  "versions": {
+    "cooperbench": "0.0.29",
+    "litellm": "1.83.14"
+  },
+  "started_at": "2026-11-12T10:18:28.110866",
+  "completed_at": "2026-11-12T11:08:05.840834",
+  "raw_logs": "logs/core-ref-delm",
+  "headline": {
+    "pairs": 10,
+    "passed": 6,
+    "pass_rate": 0.6,
+    "clean_merge_passed": 6,
+    "clean_merge_pass_rate": 0.6,
+    "merge_conflicts": 0,
+    "agents_at_step_limit": 0,
+    "agents_errored": 0,
+    "cost_usd": 18.5716,
+    "cost_per_pair_usd": 1.8572,
+    "wall_minutes": 49.6
+  },
+  "delm": {
+    "board_writes_total": 99,
+    "median_board_writes_per_pair": 10.0,
+    "notes": 56,
+    "applies": 0,
+    "apply_conflicts": 0,
+    "waits": 136,
+    "board_errors": 0,
+    "pairs_with_board_writes": 10
+  },
+  "load": {
+    "peak_input_tokens_per_min": 6032625,
+    "median_input_tokens_per_min": 1616664,
+    "peak_calls_per_min": 112,
+    "total_retries": 0,
+    "rate_limit_retries": 0,
+    "server_busy_retries": 0
+  }
+}

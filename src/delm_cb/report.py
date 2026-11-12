@@ -683,6 +683,21 @@ def _pair_key(row: dict[str, Any]) -> tuple[str, int, int, int]:
     )
 
 
+def _short_baseline_label(label: str) -> str:
+    clean = label.replace("`", "").strip()
+    if clean.startswith("solo"):
+        return "`solo`"
+    if clean.startswith("coop --git"):
+        if "#1" in clean:
+            return "`coop` #1"
+        if "#2" in clean:
+            return "`coop` #2"
+        return "`coop` ref"
+    if "+" in clean:
+        return f"`{clean.split('+', 1)[1].strip()}`"
+    return f"`{clean}`"
+
+
 def _format_baseline_row(
     arm: MidpointArm,
     label: str,
@@ -692,16 +707,19 @@ def _format_baseline_row(
     h = run_json["headline"]
     n = max(int(h["pairs"]), 1)
     passed = int(h["passed"])
+    is_solo = run_json.get("setting") == "solo"
     clean_passed = sum(_is_clean_merge_pass(p) for p in pairs)
-    conflicts = int(h["merge_conflicts"])
+    clean_cell = "n/a" if is_solo else f"{clean_passed}/{n} ({clean_passed / n:.0%})"
+    conflicts_cell = "—" if is_solo else str(int(h["merge_conflicts"]))
     msgs = [int(float(p.get("messages_sent") or 0)) for p in pairs]
     med_msgs = int(statistics.median(msgs)) if msgs else 0
+    msgs_cell = "—" if is_solo else f"{sum(msgs):,} (med {med_msgs})"
     cost = float(h["cost_usd"])
     wall = float(h["wall_minutes"])
     return (
         f"| `{arm.subset}` | `{arm.model}` (`{arm.thinking}`) | {label} "
-        f"| {passed}/{n} ({passed / n:.0%}) | {clean_passed}/{n} ({clean_passed / n:.0%}) "
-        f"| {conflicts} | — | {sum(msgs):,} (med {med_msgs}) | — | `${cost:.2f}` | {wall:.0f}m |"
+        f"| {passed}/{n} ({passed / n:.0%}) | {clean_cell} "
+        f"| {conflicts_cell} | — | {msgs_cell} | — | `${cost:.2f}` | {wall:.0f}m |"
     )
 
 
@@ -723,10 +741,13 @@ def _format_delm_row(
     for label, _, base in baseline_data:
         if base is None:
             continue
-        _, base_pairs = base
+        base_run, base_pairs = base
         wins, losses, clean_wins, clean_losses = _paired_delta(delm_pairs, base_pairs)
-        short = label.split()[-1] if len(baseline_data) > 1 else "ref"
-        win_loss_parts.append(f"+{wins}/-{losses} (clean +{clean_wins}/-{clean_losses}) vs {short}")
+        short = _short_baseline_label(label)
+        if base_run.get("setting") == "solo":
+            win_loss_parts.append(f"+{wins}/-{losses} vs {short}")
+        else:
+            win_loss_parts.append(f"+{wins}/-{losses} (clean +{clean_wins}/-{clean_losses}) vs {short}")
     win_loss = "; ".join(win_loss_parts) if win_loss_parts else "—"
     activity = (
         f"{int(d.get('notes', 0))} / {int(d.get('applies', 0))} / "
@@ -773,10 +794,14 @@ def _format_paired_breakdown(
     delm_pairs: list[dict[str, Any]],
     baseline_data: list[tuple[str, str, tuple[dict[str, Any], list[dict[str, Any]]] | None]],
 ) -> list[str]:
-    valid_baselines = [(label, base[1]) for label, _, base in baseline_data if base is not None]
-    if not valid_baselines:
+    coop_baselines = [
+        (label, base[1])
+        for label, _, base in baseline_data
+        if base is not None and base[0].get("setting") != "solo"
+    ]
+    if not coop_baselines:
         return []
-    label, base_pairs = valid_baselines[0]
+    label, base_pairs = coop_baselines[0]
     base_map = {_pair_key(p): p for p in base_pairs}
     delm_map = {_pair_key(p): p for p in delm_pairs}
     wins: list[str] = []
