@@ -87,7 +87,7 @@ _(What we saw in the traces.)_
 
 | | |
 | :--- | :--- |
-| Agent config | `/usr/local/google/home/vigneshsairaj/cs329z/paper-video/configs/reference_medium.yaml` |
+| Agent config | `configs/reference_medium.yaml` |
 | Concurrency | `-c 2` (pairs run at once) |
 | API key slot | default |
 | Commit | `caba474` |

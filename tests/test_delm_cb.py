@@ -17,10 +17,16 @@ from delm_cb.adapter import DelmDefaultAgent, VENDOR_BOARD_DIR
 from delm_cb.board_runtime import PairBoardRuntime
 from delm_cb.cli import merge_shards, run_midpoint_suite, split_subset
 from delm_cb.prompts import DELM_INSTANCE_TEMPLATE, DELM_SYSTEM_TEMPLATE
-from delm_cb.report import export_run, generate_midpoint_comparison
+from delm_cb.report import (
+    PACKAGE_ROOT,
+    export_run,
+    generate_midpoint_comparison,
+    resolve_cooperbench_root,
+)
 
-COOPERBENCH_DATASET = Path("/usr/local/google/home/vigneshsairaj/CooperBench/dataset")
-COOPERBENCH_RESULTS = Path("/usr/local/google/home/vigneshsairaj/CooperBench/results")
+COOPERBENCH_ROOT = resolve_cooperbench_root()
+COOPERBENCH_DATASET = COOPERBENCH_ROOT / "dataset"
+COOPERBENCH_RESULTS = COOPERBENCH_ROOT / "results"
 
 
 def test_prepopulated_board_and_read_views(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +186,7 @@ def test_nudge_unsubmitted_triggers_without_comm() -> None:
         ("go_chi_task", 27, [3, 4], "mux.go"),
     ],
 )
-def test_container_board_end_to_end(
+def test_docker_container_board_end_to_end(
     tmp_path: Path,
     repo_name: str,
     task_id: int,
@@ -476,6 +482,81 @@ def test_split_merge_suite_dry_run_and_report(tmp_path: Path) -> None:
         "3-flash-ref-low-delm",
     ]
     assert all(len(entry["shards"]) == 4 for entry in plan)
+
+
+def test_resolve_cooperbench_root_and_export_relativization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify COOPERBENCH_ROOT override and PACKAGE_ROOT path relativization in export_run."""
+    custom_cb = tmp_path / "CustomCooperBench"
+    custom_cb.mkdir()
+    monkeypatch.setenv("COOPERBENCH_ROOT", str(custom_cb))
+    assert resolve_cooperbench_root() == custom_cb.resolve()
+
+    logs_dir = tmp_path / "logs"
+    results_dir = tmp_path / "results"
+    run_dir = logs_dir / "rel-test"
+    pair_dir = run_dir / "coop" / "openai_tiktoken_task" / "0" / "f4_f8"
+    pair_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "config.json").write_text(
+        json.dumps({"run_name": "rel-test", "setting": "coop", "model": "vertex_ai/gemini-3.8-flash"}),
+        encoding="utf-8",
+    )
+    (run_dir / "summary.json").write_text(
+        json.dumps({"total_time_seconds": 60.0}),
+        encoding="utf-8",
+    )
+    (run_dir / "launch.json").write_text(
+        json.dumps(
+            {
+                "subset": "core",
+                "git_enabled": True,
+                "command": (
+                    f"{PACKAGE_ROOT}/src/delm_cb/cli.py run -n rel-test "
+                    f"--agent-config {PACKAGE_ROOT}/configs/reference_medium.yaml"
+                ),
+                "agent_config_path": f"{PACKAGE_ROOT}/configs/reference_medium.yaml",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pair_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "repo": "openai_tiktoken_task",
+                "task_id": 0,
+                "features": [4, 8],
+                "agents": {
+                    "agent1": {"feature_id": 4, "status": "Submitted", "cost": 0.5, "steps": 10, "patch_lines": 5},
+                    "agent2": {"feature_id": 8, "status": "Submitted", "cost": 0.5, "steps": 10, "patch_lines": 5},
+                },
+                "total_cost": 1.0,
+                "duration_seconds": 30.0,
+                "messages_sent": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pair_dir / "eval.json").write_text(
+        json.dumps(
+            {
+                "both_passed": True,
+                "feature1": {"passed": True},
+                "feature2": {"passed": True},
+                "merge": {"status": "clean", "strategy": "naive"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exported = export_run("rel-test", logs_dir=logs_dir, results_dir=results_dir)
+    assert exported["agent_config_path"] == "configs/reference_medium.yaml"
+    assert (
+        exported["command"]
+        == "src/delm_cb/cli.py run -n rel-test --agent-config configs/reference_medium.yaml"
+    )
+    assert str(PACKAGE_ROOT) not in (results_dir / "rel-test" / "summary.md").read_text(encoding="utf-8")
 
 
 def _start_sleep_container(

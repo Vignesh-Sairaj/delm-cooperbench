@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-for extra_path in (str(PACKAGE_ROOT / "src"), str(PACKAGE_ROOT / "vendor" / "delm")):
-    if extra_path not in sys.path:
-        sys.path.insert(0, extra_path)
 
-from delm_cb.cli import main  # noqa: E402
+def _main() -> int:
+    package_root = Path(__file__).resolve().parents[1]
+    for extra_path in (str(package_root / "src"), str(package_root / "vendor" / "delm")):
+        if extra_path not in sys.path:
+            sys.path.insert(0, extra_path)
+    cli_main = importlib.import_module("delm_cb.cli").main
+    return int(cli_main(["suite", *sys.argv[1:]]))
 
 
 if __name__ == "__main__":
-    sys.exit(main(["suite", *sys.argv[1:]]))
+    sys.exit(_main())

@@ -26,17 +26,21 @@ from cooperbench.runner.tasks import discover_tasks
 
 from delm_cb.adapter import DelmMiniSweAgentV2Runner
 from delm_cb.board_runtime import BOARD_WRITE_ACTIONS, PairBoardRuntime
-from delm_cb.report import MIDPOINT_ARMS, MidpointArm, export_run, generate_midpoint_comparison
+from delm_cb.report import (
+    MIDPOINT_ARMS,
+    MidpointArm,
+    export_run,
+    generate_midpoint_comparison,
+    relativize_package_paths,
+    resolve_cooperbench_root,
+)
 
 _REGISTERED_RUNNER = DelmMiniSweAgentV2Runner
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-COOPERBENCH_ROOT = Path("/usr/local/google/home/vigneshsairaj/CooperBench")
-DEFAULT_DATASET_DIR = COOPERBENCH_ROOT / "dataset"
 DEFAULT_LOGS_DIR = PACKAGE_ROOT / "logs"
 DEFAULT_RESULTS_DIR = PACKAGE_ROOT / "results"
 DEFAULT_SHARDS_DIR = PACKAGE_ROOT / "_shards"
-DEFAULT_ENV_FILE = COOPERBENCH_ROOT / ".env"
 SHARD_RE = re.compile(r"-shard(\d+)of(\d+)$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -614,7 +618,7 @@ def _load_cooperbench_env(
     key_slot: int | None,
     env_file: Path | str | None = None,
 ) -> None:
-    env_path = Path(env_file) if env_file is not None else DEFAULT_ENV_FILE
+    env_path = Path(env_file) if env_file is not None else resolve_cooperbench_root() / ".env"
     if env_path.exists():
         for key, value in _parse_env_file(env_path).items():
             os.environ.setdefault(key, value)
@@ -666,7 +670,11 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 
 
 def _resolve_dataset_dir(dataset_dir: Path | str | None) -> Path:
-    return Path(dataset_dir).resolve() if dataset_dir is not None else DEFAULT_DATASET_DIR
+    return (
+        Path(dataset_dir).resolve()
+        if dataset_dir is not None
+        else resolve_cooperbench_root() / "dataset"
+    )
 
 
 def _resolve_agent_config_path(agent_config: str | None) -> Path | None:
@@ -837,11 +845,11 @@ def _write_launch_metadata(
         "git_enabled": True,
         "concurrency": concurrency,
         "key_slot": int(key_slot) if key_slot is not None else None,
-        "command": command_str,
+        "command": relativize_package_paths(command_str),
         "launched_at": dt.datetime.now().isoformat(timespec="seconds"),
         "git_commit": _run_git_stdout("rev-parse", "HEAD"),
         "git_dirty": bool(_run_git_stdout("status", "--porcelain", "--untracked-files=no")),
-        "agent_config_path": str(agent_config_path) if agent_config_path else None,
+        "agent_config_path": relativize_package_paths(str(agent_config_path)) if agent_config_path else None,
         "agent_config": agent_config_path.read_text(encoding="utf-8") if agent_config_path else None,
         "versions": versions,
         "cpus": os.cpu_count(),

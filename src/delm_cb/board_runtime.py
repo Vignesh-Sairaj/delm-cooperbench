@@ -375,8 +375,8 @@ def _make_board_handler(context: ProtectedBoard, actors: dict[str, str]) -> type
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-            del format, args
+        def log_message(self, *args: Any) -> None:
+            del args
 
         def do_GET(self) -> None:
             self._reply(200, {"ready": True} if self.path == "/health" else {"error": "not found"})

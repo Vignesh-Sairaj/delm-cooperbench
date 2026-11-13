@@ -1,3 +1,0 @@
-repo,task_id,feature_a,feature_b,agent_id,feature_id,role,status,steps,cost_usd,patch_lines,model_calls,reasoning_tokens,compactions,board_writes,notes,applies,apply_conflicts,waits,board_errors,error
-openai_tiktoken_task,0,4,8,agent2,8,peer,Submitted,26,0.074279,78,25,0,0,3,0,0,0,1,0,
-openai_tiktoken_task,0,4,8,agent1,4,peer,Submitted,27,0.083688,195,27,0,0,3,0,0,0,2,0,

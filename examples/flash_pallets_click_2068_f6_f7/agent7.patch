@@ -1,0 +1,202 @@
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index 7b97bfb..a7e6fcc 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -484,11 +484,13 @@ class Editor:
+         editor: str | None = None,
+         env: cabc.Mapping[str, str] | None = None,
+         require_save: bool = True,
++        escape_shell: bool = False,
+         extension: str = ".txt",
+     ) -> None:
+         self.editor = editor
+         self.env = env
+         self.require_save = require_save
++        self.escape_shell = escape_shell
+         self.extension = extension
+ 
+     def get_editor(self) -> str:
+@@ -515,8 +517,23 @@ class Editor:
+             environ = os.environ.copy()
+             environ.update(self.env)
+ 
++        if self.escape_shell:
++            import shlex
++
++            try:
++                editor_parts = shlex.split(editor)
++            except ValueError:
++                editor_parts = [editor]
++            if editor_parts:
++                editor_cmd = " ".join(shlex.quote(part) for part in editor_parts)
++                cmd = f"{editor_cmd} {shlex.quote(filename)}"
++            else:
++                cmd = shlex.quote(filename)
++        else:
++            cmd = f'{editor} "{filename}"'
++
+         try:
+-            c = subprocess.Popen(f'{editor} "{filename}"', env=environ, shell=True)
++            c = subprocess.Popen(cmd, env=environ, shell=True)
+             exit_code = c.wait()
+             if exit_code != 0:
+                 raise ClickException(
+diff --git a/src/click/termui.py b/src/click/termui.py
+index e14e670..e66bd38 100644
+--- a/src/click/termui.py
++++ b/src/click/termui.py
+@@ -649,6 +649,7 @@ def edit(
+     env: cabc.Mapping[str, str] | None = None,
+     require_save: bool = True,
+     extension: str = ".txt",
++    escape_shell: bool = False,
+     filename: str | None = None,
+ ) -> t.AnyStr | None:
+     r"""Edits the given text in the defined editor.  If an editor is given
+@@ -674,13 +675,22 @@ def edit(
+     :param extension: the extension to tell the editor about.  This defaults
+                       to `.txt` but changing this might change syntax
+                       highlighting.
++    :param escape_shell: whether to escape special shell characters in
++                         filenames and editor arguments to prevent command
++                         injection.
+     :param filename: if provided it will edit this file instead of the
+                      provided text contents.  It will not use a temporary
+                      file as an indirection in that case.
+     """
+     from ._termui_impl import Editor
+ 
+-    ed = Editor(editor=editor, env=env, require_save=require_save, extension=extension)
++    ed = Editor(
++        editor=editor,
++        env=env,
++        require_save=require_save,
++        extension=extension,
++        escape_shell=escape_shell,
++    )
+ 
+     if filename is None:
+         return ed.edit(text)
+diff --git a/tests/test_termui.py b/tests/test_termui.py
+index 8fdfe8d..a32ab44 100644
+--- a/tests/test_termui.py
++++ b/tests/test_termui.py
+@@ -380,6 +380,118 @@ def test_fast_edit(runner):
+     assert result == "aTest\nbTest\n"
+ 
+ 
++def test_edit_escape_shell_disabled(monkeypatch):
++    called_cmd = []
++
++    class DummyPopen:
++        def __init__(self, cmd, **kwargs):
++            called_cmd.append(cmd)
++
++        def wait(self):
++            return 0
++
++    monkeypatch.setattr("subprocess.Popen", DummyPopen)
++
++    click.edit(filename="file.txt; rm -rf /", editor="vim", escape_shell=False)
++    assert called_cmd == ['vim "file.txt; rm -rf /"']
++
++    called_cmd.clear()
++    click.edit(filename="file.txt; rm -rf /", editor="vim")
++    assert called_cmd == ['vim "file.txt; rm -rf /"']
++
++
++@pytest.mark.parametrize(
++    "filename",
++    [
++        "file.txt; rm -rf /",
++        "file.txt | cat",
++        "file.txt`whoami`",
++        "file.txt$(whoami)",
++        "file name with spaces.txt",
++        'file"name.txt',
++        "file'name.txt",
++    ],
++)
++def test_edit_escape_shell_filename(monkeypatch, filename):
++    import shlex
++
++    called_cmd = []
++
++    class DummyPopen:
++        def __init__(self, cmd, **kwargs):
++            called_cmd.append(cmd)
++
++        def wait(self):
++            return 0
++
++    monkeypatch.setattr("subprocess.Popen", DummyPopen)
++
++    click.edit(filename=filename, editor="vim", escape_shell=True)
++    expected_cmd = f"vim {shlex.quote(filename)}"
++    assert called_cmd == [expected_cmd]
++
++
++@pytest.mark.parametrize(
++    ("editor", "expected_editor_cmd"),
++    [
++        ("vim", "vim"),
++        ("vim -u NONE", "vim -u NONE"),
++        ("sed -i~ 's/$/Test/'", "sed '-i~' 's/$/Test/'"),
++        ("vim; rm -rf /", "'vim;' rm -rf /"),
++        ("vim | malicious", "vim '|' malicious"),
++        ("vim `whoami`", "vim '`whoami`'"),
++        ("vim $(whoami)", "vim '$(whoami)'"),
++    ],
++)
++def test_edit_escape_shell_editor(monkeypatch, editor, expected_editor_cmd):
++    called_cmd = []
++
++    class DummyPopen:
++        def __init__(self, cmd, **kwargs):
++            called_cmd.append(cmd)
++
++        def wait(self):
++            return 0
++
++    monkeypatch.setattr("subprocess.Popen", DummyPopen)
++
++    click.edit(filename="safe.txt", editor=editor, escape_shell=True)
++    assert called_cmd == [f"{expected_editor_cmd} safe.txt"]
++
++
++@pytest.mark.skipif(platform.system() == "Windows", reason="No sed on Windows.")
++def test_edit_escape_shell_functional(runner):
++    result = click.edit("a\nb", editor="sed -i~ 's/$/Test/'", escape_shell=True)
++    assert result == "aTest\nbTest\n"
++
++
++def test_editor_class_escape_shell(monkeypatch):
++    import shlex
++    from click._termui_impl import Editor
++
++    called_cmd = []
++
++    class DummyPopen:
++        def __init__(self, cmd, **kwargs):
++            called_cmd.append(cmd)
++
++        def wait(self):
++            return 0
++
++    monkeypatch.setattr("subprocess.Popen", DummyPopen)
++
++    ed_safe = Editor(editor="vim", escape_shell=True)
++    assert ed_safe.escape_shell is True
++    ed_safe.edit_file("my;file.txt")
++    assert called_cmd == [f"vim {shlex.quote('my;file.txt')}"]
++
++    called_cmd.clear()
++    ed_default = Editor(editor="vim")
++    assert ed_default.escape_shell is False
++    ed_default.edit_file("my;file.txt")
++    assert called_cmd == ['vim "my;file.txt"']
++
++
+ @pytest.mark.parametrize(
+     ("prompt_required", "required", "args", "expect"),
+     [
