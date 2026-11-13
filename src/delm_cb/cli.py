@@ -537,6 +537,12 @@ def main(argv: list[str] | None = None) -> int:
     p_suite.add_argument("--results-dir", default=None)
     p_suite.add_argument("--shards-dir", default=None)
 
+    p_showcase = sub.add_parser("showcase", help="Build self-contained 3-pane HTML replay showcase")
+    p_showcase.add_argument("-o", "--output", default=str(PACKAGE_ROOT / "demos" / "delm_showcase.html"))
+    p_showcase.add_argument("--logs-dir", default=None)
+    p_showcase.add_argument("--results-dir", default=None)
+    p_showcase.add_argument("--cooperbench-root", default=None)
+
     args = parser.parse_args(argv)
     if args.command == "run":
         features = [int(x) for x in args.features.split(",")] if args.features else None
@@ -608,6 +614,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.dry_run:
             print(json.dumps(plan, indent=2))
+        return 0
+    if args.command == "showcase":
+        from delm_cb.showcase import export_delm_showcase
+
+        out_path = export_delm_showcase(
+            output_path=args.output,
+            delm_logs_dir=args.logs_dir,
+            delm_results_dir=args.results_dir,
+            cooperbench_root=args.cooperbench_root,
+        )
+        print(f"wrote {out_path}")
         return 0
     return 1
 

@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import jinja2
@@ -22,6 +23,11 @@ from delm_cb.report import (
     export_run,
     generate_midpoint_comparison,
     resolve_cooperbench_root,
+)
+from delm_cb.showcase import (
+    compile_delm_pair_replay,
+    convert_monotonic_to_epoch,
+    patch_replay_html,
 )
 
 COOPERBENCH_ROOT = resolve_cooperbench_root()
@@ -557,6 +563,217 @@ def test_resolve_cooperbench_root_and_export_relativization(
         == "src/delm_cb/cli.py run -n rel-test --agent-config configs/reference_medium.yaml"
     )
     assert str(PACKAGE_ROOT) not in (results_dir / "rel-test" / "summary.md").read_text(encoding="utf-8")
+
+
+def test_showcase_alignment_collapsing_delivery_and_html(tmp_path: Path) -> None:
+    """Verify monotonic-to-epoch conversion, wait collapsing, peer read badges, and HTML patching."""
+    base_wall_ns = 1_794_478_700_000_000_000
+    base_mono_ns = 1_000_000_000_000
+    events = [
+        {
+            "sequence": 1,
+            "time_ns": base_mono_ns,
+            "actor": "system",
+            "kind": "item",
+            "payload": {"id": "id1", "subject": "Feature 4: Alpha", "detail": "Spec 4"},
+        },
+        {
+            "sequence": 2,
+            "time_ns": base_mono_ns + 100_000_000,
+            "actor": "system",
+            "kind": "item",
+            "payload": {"id": "id2", "subject": "Feature 8: Beta", "detail": "Spec 8"},
+        },
+        {"sequence": 3, "time_ns": base_mono_ns + 200_000_000, "actor": "agent1", "kind": "claim", "payload": {"item": "id1"}},
+        {"sequence": 4, "time_ns": base_mono_ns + 300_000_000, "actor": "agent1", "kind": "status", "payload": {"text": "Feature 4: Alpha", "auto": True}},
+        {"sequence": 5, "time_ns": base_mono_ns + 400_000_000, "actor": "agent2", "kind": "claim", "payload": {"item": "id2"}},
+        {"sequence": 6, "time_ns": base_mono_ns + 500_000_000, "actor": "agent2", "kind": "status", "payload": {"text": "Feature 8: Beta", "auto": True}},
+        {
+            "sequence": 7,
+            "time_ns": base_mono_ns + 1_000_000_000,
+            "actor": "system",
+            "kind": "session",
+            "payload": {"actor": "agent1", "state": "running", "recorded_at_ns": base_wall_ns + 1_000_000_000},
+        },
+        {
+            "sequence": 8,
+            "time_ns": base_mono_ns + 5_000_000_000,
+            "actor": "agent1",
+            "kind": "note",
+            "payload": {"id": "n1", "type": "FACT", "text": "Shared signature", "scope": "core.py", "basis": "inspected"},
+        },
+        {
+            "sequence": 9,
+            "time_ns": base_mono_ns + 10_000_000_000,
+            "actor": "agent2",
+            "kind": "wait",
+            "payload": {"requested": 25.0, "waited": 25.0, "woke_by": "timeout", "woken": []},
+        },
+        {
+            "sequence": 10,
+            "time_ns": base_mono_ns + 35_000_000_000,
+            "actor": "agent2",
+            "kind": "wait",
+            "payload": {"requested": 25.0, "waited": 25.0, "woke_by": "timeout", "woken": []},
+        },
+        {
+            "sequence": 11,
+            "time_ns": base_mono_ns + 40_000_000_000,
+            "actor": "agent2",
+            "kind": "read",
+            "payload": {"via": "read"},
+        },
+        {
+            "sequence": 12,
+            "time_ns": base_mono_ns + 42_000_000_000,
+            "actor": "agent2",
+            "kind": "wait",
+            "payload": {"requested": 25.0, "waited": 0.2, "woke_by": "update", "woken": [{"actor": "agent1", "kind": "note"}]},
+        },
+        {
+            "sequence": 13,
+            "time_ns": base_mono_ns + 45_000_000_000,
+            "actor": "agent1",
+            "kind": "done",
+            "payload": {"item": "id1", "summary": "Completed Feature 4"},
+        },
+    ]
+
+    seq_map = convert_monotonic_to_epoch(events, [], [])
+    assert seq_map[8] == pytest.approx((base_wall_ns + 5_000_000_000) / 1e9)
+
+    step_like = [SimpleNamespace(timestamp=100.0), SimpleNamespace(timestamp=200.0)]
+    fallback_map = convert_monotonic_to_epoch(
+        [{"sequence": 1, "time_ns": 10, "kind": "note"}, {"sequence": 2, "time_ns": 20, "kind": "done"}],
+        step_like,
+        [],
+    )
+    assert fallback_map == {1: pytest.approx(100.0), 2: pytest.approx(200.0)}
+
+    run_dir = tmp_path / "logs" / "core-ref-delm"
+    pair_dir = run_dir / "coop" / "openai_tiktoken_task" / "0" / "f4_f8"
+    pair_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "results" / "core-ref-delm").mkdir(parents=True, exist_ok=True)
+    (run_dir / "config.json").write_text(json.dumps({"setting": "coop", "model": "vertex_ai/gemini-3.8-flash"}), encoding="utf-8")
+    (run_dir / "launch.json").write_text(json.dumps({"setting": "coop", "git_enabled": True}), encoding="utf-8")
+    (pair_dir / "result.json").write_text(json.dumps({"repo": "openai_tiktoken_task", "task_id": 0, "features": [4, 8]}), encoding="utf-8")
+    (pair_dir / "eval.json").write_text(json.dumps({"both_passed": True, "merge": {"status": "clean"}}), encoding="utf-8")
+    (pair_dir / "delm_board_events.json").write_text(
+        json.dumps({"preseed_max_sequence": 6, "events": events, "bodies": []}),
+        encoding="utf-8",
+    )
+
+    t0 = base_wall_ns / 1e9
+    (pair_dir / "agent1_traj.json").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "extra": {
+                            "timestamp": t0 + 4.0,
+                            "actions": [{"command": "sh /tools/context.sh note --type FACT"}],
+                            "response": {"usage": {}},
+                        },
+                    },
+                    {"role": "tool", "content": "ok", "extra": {"returncode": 0}},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "extra": {
+                            "timestamp": t0 + 44.0,
+                            "actions": [{"command": "sh /tools/context.sh done --item id1"}],
+                            "response": {"usage": {}},
+                        },
+                    },
+                    {"role": "tool", "content": "done", "extra": {"returncode": 0}},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pair_dir / "agent2_traj.json").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "extra": {
+                            "timestamp": t0 + 39.0,
+                            "actions": [{"command": "sh /tools/context.sh read"}],
+                            "response": {"usage": {}},
+                        },
+                    },
+                    {"role": "tool", "content": "ok", "extra": {"returncode": 0}},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    replay = compile_delm_pair_replay(
+        "core-ref-delm",
+        "openai_tiktoken_task",
+        0,
+        (4, 8),
+        logs_dir=tmp_path / "logs",
+        results_dir=tmp_path / "results",
+        dataset_dir=COOPERBENCH_DATASET,
+    )
+    assert replay["config_flags"]["delm_board"] is True
+    assert replay["steps"]["agent1"][0]["action_phase"] == "message"
+    assert replay["waits"] == 3
+    assert [m["intent"] for m in replay["messages"]] == ["FACT", "DONE"]
+    assert all(not m["wait"] for m in replay["messages"])
+    assert len(replay["wait_events"]) == 2
+    assert replay["wait_events"][0]["count"] == 2
+    assert replay["wait_events"][0]["waited_s"] == pytest.approx(50.0)
+    assert replay["wait_events"][0]["woke_by"] == "timeout"
+    assert replay["wait_events"][1]["woke_by"] == "update"
+    assert replay["wait_events"][1]["waited_s"] == pytest.approx(0.2)
+    assert replay["messages"][0]["delivered_step"] == 1
+    assert replay["messages"][1]["delivery_status"] == "undelivered_peer_exited"
+
+    assert len(replay["board_snapshots"]) >= 3
+    last_snap = replay["board_snapshots"][-1]
+    assert last_snap["queue_items"][0]["label"] == "Item 1"
+    assert last_snap["queue_items"][0]["state"] == "done"
+    assert last_snap["queue_items"][0]["summary"] == "Completed Feature 4"
+    assert last_snap["queue_items"][0]["detail"] == "Spec 4"
+    raw_view = json.loads(last_snap["raw_text"])
+    assert raw_view["reader"] == "viewer"
+    assert raw_view["full"] is True
+    assert len(raw_view["notes"]) == 1
+
+    assert replay["board_snapshots"][0]["sessions"][0]["state"] == "starting"
+    assert replay["board_snapshots"][1]["sessions"][0]["state"] == "running"
+
+    first_frame = replay["timeline"][0]
+    assert [t["status"] for t in first_frame["center"]["threads"]] == ["open", "open"]
+    assert first_frame["board_snapshot_idx"] == 1
+    assert any(f["kind"] == "board_wait" for f in replay["timeline"])
+    last_frame = replay["timeline"][-1]
+    assert last_frame["board_snapshot_idx"] == len(replay["board_snapshots"]) - 1
+    assert [t["status"] for t in last_frame["center"]["threads"]] == ["resolved", "open"]
+    badges = {m["id"]: m["live_badge"] for m in last_frame["center"]["messages"]}
+    assert badges["b1"] == "👁 Read by agent2 @ Step 1"
+    assert badges["b2"] == "⏭ Unread before agent2 exited"
+
+    template_html = (COOPERBENCH_ROOT / "tools" / "replay_viewer" / "static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    patched = patch_replay_html(template_html)
+    assert "<title>DeLM × CooperBench — Replay Studio</title>" in patched
+    assert "DeLM Task Queue & Claims" in patched
+    assert ".intent-FACT" in patched
+    assert "centerTabBar" in patched
+    assert "Shared Context (" in patched
+    assert "Task Queue (" in patched
+    assert "Raw Board View" in patched
+    assert "Posted" in patched
+    assert "jumpWaitPollPill" in patched
 
 
 def _start_sleep_container(
