@@ -28,20 +28,21 @@ from delm_cb.report import (
 )
 
 DEFAULT_SHOWCASE_HTML = PACKAGE_ROOT / "demos" / "delm_showcase.html"
-DEFAULT_DIFF_PATCH = PACKAGE_ROOT / "demos" / "cooperbench_to_delm.patch"
+DEFAULT_PROMPT_PATCH = PACKAGE_ROOT / "demos" / "prompt.patch"
+DEFAULT_ADAPTER_PATCH = PACKAGE_ROOT / "demos" / "adapter.patch"
 MAX_SHOWCASE_OUTPUT_CHARS = 4_000
 MAX_SHOWCASE_THOUGHT_CHARS = 3_000
 
-_DIFF_PATCH_HEADER = "\n".join(
+_PROMPT_PATCH_HEADER = "\n".join(
     [
-        "# Unified diff summary of adaptations relative to upstream CooperBench (cooperbench/CooperBench @ 63b9d44).",
+        "# Rendered coop --git prompt diff: CooperBench coop.yaml vs. delm_cb.prompts.",
+        "# Rendered with Jinja2 StrictUndefined under identical workspace settings (messaging_enabled=True vs. False).",
+    ]
+)
+_ADAPTER_PATCH_HEADER = "\n".join(
+    [
+        "# Agent runner diff: CooperBench mini_swe_agent_v2/adapter.py vs. src/delm_cb/adapter.py.",
         "# vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761 board/.",
-        "#",
-        "# Sections:",
-        "#   1. Rendered Coop + Git Prompts: cooperbench/agents/mini_swe_agent_v2/config/coop.yaml vs. delm_cb.prompts",
-        "#   2. Agent Runner Adapter:         cooperbench/agents/mini_swe_agent_v2/adapter.py vs. src/delm_cb/adapter.py",
-        "#   3. Replay Studio UI Template:    tools/replay_viewer/static/index.html vs. unbundled showcase HTML template",
-        "",
     ]
 )
 
@@ -356,12 +357,13 @@ def export_delm_showcase(
     return out_path
 
 
-def export_cooperbench_diff_patch(
-    output_path: Path | str = DEFAULT_DIFF_PATCH,
+def export_cooperbench_diff_patches(
     *,
+    prompt_patch_path: Path | str = DEFAULT_PROMPT_PATCH,
+    adapter_patch_path: Path | str = DEFAULT_ADAPTER_PATCH,
     cooperbench_root: Path | str | None = None,
-) -> Path:
-    """Write unified diffs comparing prompt templates, adapter, and replay UI against CooperBench."""
+) -> tuple[Path, Path]:
+    """Write separate unified diffs for rendered prompts and the agent runner adapter against CooperBench."""
     cb_root = Path(cooperbench_root) if cooperbench_root is not None else resolve_cooperbench_root()
 
     coop_yaml_path = cb_root / "src" / "cooperbench" / "agents" / "mini_swe_agent_v2" / "config" / "coop.yaml"
@@ -398,40 +400,35 @@ def export_cooperbench_diff_patch(
     )
     delm_adapter = (PACKAGE_ROOT / "src" / "delm_cb" / "adapter.py").read_text(encoding="utf-8")
 
-    cb_template = (cb_root / "tools" / "replay_viewer" / "static" / "index.html").read_text(encoding="utf-8")
-    delm_template = patch_replay_html(cb_template)
-
-    sections = [
-        _unified_diff_section(
-            cb_prompt,
-            delm_prompt,
-            fromfile="a/cooperbench/prompts/coop_git_rendered.md",
-            tofile="b/delm_cb/prompts/delm_coop_git_rendered.md",
-        ),
-        _unified_diff_section(
-            cb_adapter,
-            delm_adapter,
-            fromfile="a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py",
-            tofile="b/src/delm_cb/adapter.py",
-        ),
-        _unified_diff_section(
-            cb_template,
-            delm_template,
-            fromfile="a/cooperbench/tools/replay_viewer/static/index.html",
-            tofile="b/demos/delm_showcase_template.html",
-        ),
-    ]
-
-    raw_patch = f"{_DIFF_PATCH_HEADER}\n" + "\n".join(section for section in sections if section)
-    sanitized_patch = _sanitize_payload(
-        raw_patch,
-        cb_root=cb_root,
-        secret_tokens=_collect_sensitive_tokens(cb_root),
+    prompt_diff = _unified_diff_section(
+        cb_prompt,
+        delm_prompt,
+        fromfile="a/cooperbench/prompts/coop_git_rendered.md",
+        tofile="b/delm_cb/prompts/delm_coop_git_rendered.md",
     )
-    out_path = Path(output_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(sanitized_patch, encoding="utf-8")
-    return out_path
+    adapter_diff = _unified_diff_section(
+        cb_adapter,
+        delm_adapter,
+        fromfile="a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py",
+        tofile="b/src/delm_cb/adapter.py",
+    )
+
+    secret_tokens = _collect_sensitive_tokens(cb_root)
+    prompt_out = _write_sanitized_patch(
+        Path(prompt_patch_path),
+        header=_PROMPT_PATCH_HEADER,
+        diff_body=prompt_diff,
+        cb_root=cb_root,
+        secret_tokens=secret_tokens,
+    )
+    adapter_out = _write_sanitized_patch(
+        Path(adapter_patch_path),
+        header=_ADAPTER_PATCH_HEADER,
+        diff_body=adapter_diff,
+        cb_root=cb_root,
+        secret_tokens=secret_tokens,
+    )
+    return prompt_out, adapter_out
 
 
 def patch_replay_html(template_html: str) -> str:
@@ -1793,6 +1790,21 @@ def _unified_diff_section(
     before_lines = (before_text.rstrip("\n") + "\n").splitlines(keepends=True)
     after_lines = (after_text.rstrip("\n") + "\n").splitlines(keepends=True)
     return "".join(difflib.unified_diff(before_lines, after_lines, fromfile=fromfile, tofile=tofile, n=3))
+
+
+def _write_sanitized_patch(
+    path: Path,
+    *,
+    header: str,
+    diff_body: str,
+    cb_root: Path,
+    secret_tokens: list[str],
+) -> Path:
+    raw_patch = f"{header}\n\n{diff_body}"
+    sanitized_patch = _sanitize_payload(raw_patch, cb_root=cb_root, secret_tokens=secret_tokens)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(sanitized_patch, encoding="utf-8")
+    return path
 
 
 def _collect_sensitive_tokens(cooperbench_root: Path) -> list[str]:

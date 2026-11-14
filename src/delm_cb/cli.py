@@ -537,12 +537,17 @@ def main(argv: list[str] | None = None) -> int:
     p_suite.add_argument("--results-dir", default=None)
     p_suite.add_argument("--shards-dir", default=None)
 
-    p_showcase = sub.add_parser("showcase", help="Build self-contained 3-pane HTML replay showcase and diff patch")
+    p_showcase = sub.add_parser("showcase", help="Build self-contained 3-pane HTML replay showcase and diff patches")
     p_showcase.add_argument("-o", "--output", default=str(PACKAGE_ROOT / "demos" / "delm_showcase.html"))
     p_showcase.add_argument(
-        "--patch-output",
+        "--prompt-patch",
         default=None,
-        help="Output path for CooperBench-to-DeLM unified diff patch (defaults to cooperbench_to_delm.patch beside --output)",
+        help="Output path for rendered prompt diff (defaults to prompt.patch beside --output)",
+    )
+    p_showcase.add_argument(
+        "--adapter-patch",
+        default=None,
+        help="Output path for runner adapter diff (defaults to adapter.patch beside --output)",
     )
     p_showcase.add_argument("--logs-dir", default=None)
     p_showcase.add_argument("--results-dir", default=None)
@@ -621,7 +626,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(plan, indent=2))
         return 0
     if args.command == "showcase":
-        from delm_cb.showcase import export_cooperbench_diff_patch, export_delm_showcase
+        from delm_cb.showcase import export_cooperbench_diff_patches, export_delm_showcase
 
         out_path = export_delm_showcase(
             output_path=args.output,
@@ -629,17 +634,24 @@ def main(argv: list[str] | None = None) -> int:
             delm_results_dir=args.results_dir,
             cooperbench_root=args.cooperbench_root,
         )
-        patch_target = (
-            Path(args.patch_output)
-            if args.patch_output is not None
-            else Path(args.output).with_name("cooperbench_to_delm.patch")
+        prompt_target = (
+            Path(args.prompt_patch)
+            if args.prompt_patch is not None
+            else Path(args.output).with_name("prompt.patch")
         )
-        patch_path = export_cooperbench_diff_patch(
-            output_path=patch_target,
+        adapter_target = (
+            Path(args.adapter_patch)
+            if args.adapter_patch is not None
+            else Path(args.output).with_name("adapter.patch")
+        )
+        prompt_path, adapter_path = export_cooperbench_diff_patches(
+            prompt_patch_path=prompt_target,
+            adapter_patch_path=adapter_target,
             cooperbench_root=args.cooperbench_root,
         )
         print(f"wrote {out_path}")
-        print(f"wrote {patch_path}")
+        print(f"wrote {prompt_path}")
+        print(f"wrote {adapter_path}")
         return 0
     return 1
 

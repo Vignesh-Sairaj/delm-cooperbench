@@ -1,0 +1,511 @@
+# Agent runner diff: CooperBench mini_swe_agent_v2/adapter.py vs. src/delm_cb/adapter.py.
+# vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761 board/.
+
+--- a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py
++++ b/src/delm_cb/adapter.py
+@@ -1,67 +1,80 @@
+-"""Mini-SWE-Agent v2 adapter for CooperBench.
+-
+-This adapter wraps the mini-swe-agent v2 framework (tool-calling version)
+-to conform to the AgentRunner interface used by CooperBench.
+-"""
++"""CooperBench agent adapter running Mini-SWE-Agent v2 with a DeLM shared-context board."""
++
++from __future__ import annotations
+ 
+ import logging
+ from pathlib import Path
++from typing import Any
+ 
+ import yaml
+ 
+ from cooperbench.agents import AgentResult
+-from cooperbench.agents.mini_swe_agent_v2.agents.default import DefaultAgent
++from cooperbench.agents._azure import azure_litellm_model, resolve_azure_config
++from cooperbench.agents._coop.runtime import normalize_patch
++from cooperbench.agents.mini_swe_agent_v2.agents.default import GIT_REMOTE, DefaultAgent
+ from cooperbench.agents.mini_swe_agent_v2.config import get_config_path
+ from cooperbench.agents.mini_swe_agent_v2.connectors import GitConnector
+-from cooperbench.agents.mini_swe_agent_v2.connectors.messaging import MessagingConnector
++from cooperbench.agents.mini_swe_agent_v2.environments.docker import DockerEnvironment
+ from cooperbench.agents.mini_swe_agent_v2.models.litellm_model import LitellmModel
+ from cooperbench.agents.mini_swe_agent_v2.utils.serialize import recursive_merge
+ from cooperbench.agents.registry import register
+-from cooperbench.team_harness import (
+-    COOP_TASK_SCRIPT_PATH,
+-    INSTALL_SNIPPET_PATH,
+-    TeamHarnessConfig,
+-    TeamSession,
+-)
++from delm_cb.board_runtime import get_pair_runtime
++from delm_cb.prompts import DELM_INSTANCE_TEMPLATE, DELM_SYSTEM_TEMPLATE
+ 
+ logger = logging.getLogger(__name__)
+-
+-
+-def _install_team_cli_in_container(env) -> None:
+-    """Drop the team CLI scripts into the v2 agent's container and
+-    create the ``coop-task-*`` shell wrappers.
+-
+-    Mirrors what the Claude Code adapter does at setup time, but
+-    inlined here because v2 doesn't have a templated setup.sh — it
+-    just `sleep 2h`s an arbitrary image.  Best-effort: any step that
+-    fails just logs a warning, so a broken team-CLI install doesn't
+-    block the run.  Env vars (``CB_TEAM_*``) are pushed onto the
+-    DockerEnvironment's container env at start-time, so this helper
+-    only needs to install the binaries — not configure the shell.
+-    """
+-    from cooperbench.agents._coop.runtime import write_file_in_container
+-
+-    try:
+-        write_file_in_container(env, "/tmp/cb-coop-task.py", COOP_TASK_SCRIPT_PATH.read_text())
+-        write_file_in_container(env, "/tmp/cb-team-install.sh", INSTALL_SNIPPET_PATH.read_text())
+-        env.execute(
+-            {
+-                "command": (
+-                    "pip install --quiet --disable-pip-version-check redis >/dev/null 2>&1 "
+-                    "|| pip3 install --quiet --disable-pip-version-check redis >/dev/null 2>&1 "
+-                    "|| true; "
+-                    "bash /tmp/cb-team-install.sh"
+-                )
+-            },
+-            timeout=120,
+-        )
+-    except Exception as e:  # noqa: BLE001 -- best-effort
+-        logger.warning("team CLI install in v2 container failed: %s", e)
+-
+-
+-@register("mini_swe_agent_v2")
+-class MiniSweAgentV2Runner:
+-    """Adapter for mini-swe-agent v2 framework (tool-calling)."""
++PACKAGE_ROOT = Path(__file__).resolve().parents[2]
++VENDOR_BOARD_DIR = PACKAGE_ROOT / "vendor" / "delm" / "board"
++
++
++class DelmDefaultAgent(DefaultAgent):
++    """DefaultAgent subclass that preserves unsubmitted/unpushed PR nudges without Redis comm."""
++
++    def __init__(self, *args: Any, delm_agent_id: str | None = None, **kwargs: Any) -> None:
++        super().__init__(*args, **kwargs)
++        self._delm_agent_id = delm_agent_id or self.agent_id
++
++    def _opened_pr(self) -> bool:
++        result = self.env.execute(
++            {"command": f"git ls-remote --tags {GIT_REMOTE} refs/tags/pr/{self._delm_agent_id}"}
++        )
++        return bool((result.get("output") or "").strip())
++
++    def _nudge_unsubmitted(self) -> bool:
++        if getattr(self, "_submit_nudges", 0) >= self.MAX_SUBMIT_NUDGES or self._opened_pr():
++            return False
++        agent = self._delm_agent_id
++        dirty = (self.env.execute({"command": "git status --porcelain"}).get("output") or "").strip()
++        ahead = (
++            self.env.execute({"command": f"git rev-list --count {GIT_REMOTE}/{agent}..HEAD 2>/dev/null"})
++            .get("output", "")
++            .strip()
++        )
++        unpushed = ahead not in ("", "0")
++        if not (dirty or unpushed):
++            return False
++        self._submit_nudges = getattr(self, "_submit_nudges", 0) + 1
++        held = "uncommitted changes" if dirty else "commits that are not pushed"
++        self.log(f"SUBMIT NUDGE {self._submit_nudges} for {agent}: {held}, no PR")
++        self.add_messages(
++            self.model.format_message(
++                role="user",
++                content=(
++                    f"You have not submitted anything. Your work is still local ({held}) and "
++                    f"no pull request exists, so it would be graded as an empty submission.\n\n"
++                    f"    git add <the files you want to submit>\n"
++                    f'    git commit -m "..."\n'
++                    f"    git push {GIT_REMOTE} HEAD:{agent}\n"
++                    f'    gh pr create --title "..." --body "..."\n\n'
++                    f"Then echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT again."
++                ),
++            )
++        )
++        return True
++
++
++@register("delm_msa_v2")
++class DelmMiniSweAgentV2Runner:
++    """CooperBench AgentRunner wiring Mini-SWE-Agent v2 containers to a pair's DeLM board."""
+ 
+     def run(
+         self,
+@@ -69,234 +82,164 @@
+         image: str,
+         *,
+         agent_id: str = "agent",
+-        model_name: str = "gpt-4o",
++        model_name: str = "vertex_ai/gemini-3.8-flash",
+         agents: list[str] | None = None,
+         comm_url: str | None = None,
+         git_server_url: str | None = None,
+         git_enabled: bool = False,
+-        messaging_enabled: bool = True,
+-        config: dict | None = None,
++        messaging_enabled: bool = False,
++        config: dict[str, Any] | None = None,
+         agent_config: str | None = None,
+         log_dir: str | None = None,
+-        team_role: str | None = None,
+-        team_id: str | None = None,
+-        task_list_url: str | None = None,
+-        team_features: TeamHarnessConfig | None = None,
+-        **kwargs,
++        **kwargs: Any,
+     ) -> AgentResult:
+-        """Run mini-swe-agent v2 on a task.
+-
+-        When team-mode kwargs (``team_role``, ``team_id``,
+-        ``task_list_url``) are set, the adapter attaches a
+-        ``TeamPoller`` to the agent so each ``step()`` injects a fresh
+-        team-task-list summary as a user message before the LLM call —
+-        the same shape as the existing inbox-poll hook.
+-        """
+-        is_team = bool(team_role and team_id and task_list_url and agents and len(agents) > 1)
+-
+-        team_session: TeamSession | None = None
+-        if is_team:
+-            team_session = TeamSession(
+-                run_id=team_id or "",
+-                redis_url=task_list_url or "",  # host-side URL; env_for() rewrites
+-                agents=list(agents or []),
+-                team_volume=str((config or {}).get("team_volume") or ""),
+-                config=team_features or TeamHarnessConfig(),
+-            )
+-            # Append the team-specific task-list section to the task
+-            # so the LLM sees the coop-task-* CLI + role-specific
+-            # workflow in its first user turn.  v2's existing coop
+-            # template already covers messaging / git / submission;
+-            # we add ONLY the task-list piece.
+-            section = team_session.prompt_section(agent_id=agent_id)
+-            if section:
+-                task = task + "\n\n---\n\n" + section
+-
+-        # auto_refresh poller (None when feature disabled).
+-        team_poller = team_session.loop_poller(agent_id=agent_id) if team_session else None
+-        # Load coop config when multiple agents, otherwise solo config.
+-        is_coop = bool(agents) and len(agents) > 1
+-        config_name = "coop" if is_coop else "solo"
+-        config_path = get_config_path(config_name)
+-        with open(config_path) as f:
+-            default_config = yaml.safe_load(f)
+-
+-        # If the caller passed an agent_config YAML path, deep-merge its
+-        # `config:` block into the defaults.  This is what CooperBench's
+-        # ``--agent-config`` flag forwards to the adapter.
+-        if agent_config:
+-            try:
+-                with open(agent_config) as f:
+-                    overrides = yaml.safe_load(f) or {}
+-                default_config = recursive_merge(default_config, overrides.get("config", overrides))
+-            except FileNotFoundError:
+-                logger.error(f"agent_config file not found: {agent_config}")
+-            except Exception as e:
+-                logger.error(f"Error loading agent_config {agent_config}: {e}")
+-
+-        # Deep-merge passed config overrides into default config so that partial
+-        # overrides (e.g. only agent.compaction_enabled) don't clobber sibling keys.
+-        if config is not None:
+-            default_config = recursive_merge(default_config, config)
+-
+-        agent_cfg = default_config.get("agent", {})
+-        model_cfg = default_config.get("model", {})
+-        env_cfg = default_config.get("environment", {})
++        del comm_url, messaging_enabled, kwargs
++        if not log_dir:
++            raise RuntimeError("DelmMiniSweAgentV2Runner requires log_dir matching a registered PairBoardRuntime")
++        runtime = get_pair_runtime(log_dir)
++
++        default_config = _load_merged_config(
++            is_coop=bool(agents) and len(agents) > 1,
++            agent_config=agent_config,
++            config=config,
++        )
++        agent_cfg = dict(default_config.get("agent", {}))
++        agent_cfg["system_template"] = DELM_SYSTEM_TEMPLATE
++        agent_cfg["instance_template"] = DELM_INSTANCE_TEMPLATE
++        model_cfg = dict(default_config.get("model", {}))
++        env_cfg = dict(default_config.get("environment", {}))
++
+         backend = default_config.get("backend", "docker")
+-
+-        # Create environment based on backend
+-        env_kwargs = {
++        if backend != "docker":
++            raise RuntimeError(f"delm_msa_v2 supports docker backend only, got {backend!r}")
++
++        records_dir = runtime.records_dir(agent_id)
++        (records_dir / "prompt.txt").write_text(task, encoding="utf-8")
++
++        container_env = dict(env_cfg.get("env") or {})
++        container_env.update(
++            {
++                "CONTEXT_URL": runtime.context_url,
++                "CONTEXT_TOKEN": runtime.token_for(agent_id),
++                "CONTEXT_PYTHON": "python3",
++                "CONTEXT_LIBRARY_PATH": "",
++                "TASK_WORKSPACE": "/workspace/repo",
++            }
++        )
++        run_args = [
++            "--rm",
++            "--add-host=host.docker.internal:host-gateway",
++            "-v",
++            f"{VENDOR_BOARD_DIR}:/tools:ro",
++            "-v",
++            f"{records_dir}:/records:rw",
++        ]
++        env_kwargs: dict[str, Any] = {
+             "image": image,
+             "cwd": "/workspace/repo",
+             "timeout": 10800,
++            "env": container_env,
++            "run_args": run_args,
+         }
+-        # Opt-in: let a config keep containers alive longer than the 2h default, for long runs
+-        # (for example 500 steps). Without this, `environment.container_timeout` was ignored.
+         if env_cfg.get("container_timeout"):
+             env_kwargs["container_timeout"] = str(env_cfg["container_timeout"])
+-        container_env = dict(env_cfg.get("env") or {})
+-        # In team mode, propagate the CB_TEAM_* env vars into every
+-        # docker-exec the agent does so ``coop-task-*`` works without
+-        # needing the agent to remember to set them.
+-        if team_session is not None:
+-            container_env.update(team_session.env_for(agent_id))
+-        if container_env:
+-            env_kwargs["env"] = container_env
+-
+-        if backend == "docker":
+-            from cooperbench.agents.mini_swe_agent_v2.environments.docker import DockerEnvironment
+-
+-            if config and config.get("git_network"):
+-                env_kwargs["network"] = config["git_network"]
+-            # Need host.docker.internal mapping so the in-container
+-            # coop-task-* CLI can reach Redis on the host (same as
+-            # claude_code / codex adapters).  Also mount the shared
+-            # team scratchpad if the feature is enabled.
+-            if team_session is not None:
+-                run_args = list(env_kwargs.get("run_args") or ["--rm"])
+-                if "--add-host=host.docker.internal:host-gateway" not in run_args:
+-                    run_args.append("--add-host=host.docker.internal:host-gateway")
+-                run_args.extend(team_session.scratchpad_mount_args())
+-                env_kwargs["run_args"] = run_args
+-            env = DockerEnvironment(**env_kwargs)
+-        else:
+-            from cooperbench.agents.mini_swe_agent_v2.environments.modal import ModalEnvironment
+-
+-            env = ModalEnvironment(**env_kwargs)
+-
+-        # Setup messaging connector if enabled
+-        comm = None
+-        use_messaging = messaging_enabled and comm_url and agents and len(agents) > 1
+-        if use_messaging:
+-            comm = MessagingConnector(agent_id=agent_id, agents=agents, url=comm_url)
+-
+-        # Register only the bash tool with the model.  send_message is
+-        # intercepted by DefaultAgent.execute_actions from inside the bash
+-        # command string (``send_message <recipient> <<'MSG' ... MSG``).
+-        # Exposing a separate send_message tool confuses smaller models
+-        # into alternating between tools unreliably.
+-        #
+-        # Azure OpenAI: when AZURE_OPENAI_* is set, point litellm at the
+-        # Azure deployment via the openai-compatible provider (model
+-        # openai/<deployment> + api_base + api_key folded into model_kwargs).
+-        from cooperbench.agents._azure import azure_litellm_model, resolve_azure_config
+-
+-        azure = resolve_azure_config()
+-        if azure:
+-            model_name = azure_litellm_model(model_name)
+-            model_kwargs = dict(model_cfg.get("model_kwargs") or {})
+-            model_kwargs.update({"api_base": azure["endpoint"], "api_key": azure["api_key"]})
+-            model_cfg = {**model_cfg, "model_kwargs": model_kwargs}
+-        model = LitellmModel(model_name=model_name, **model_cfg)
+-
+-        # Always set up a git connector. Coop points it at the shared server; solo gets a
+-        # bare repo in its own sandbox. Both then submit by opening a PR, so there is one
+-        # submission path rather than two that can drift apart.
+-        git_connector = GitConnector(
+-            agent_id=agent_id,
+-            agents=agents or [agent_id],
+-            server_url=git_server_url if (git_enabled and git_server_url) else "",
+-        )
+-        git_connector.setup(env)
+-
+-        # Setup team CLI in the container if either of its consumers
+-        # (the task_list or the typed protocol verbs) is active.  Both
+-        # share the same helper.
+-        if team_session is not None and (team_session.config.task_list or team_session.config.protocol):
+-            _install_team_cli_in_container(env)
+-
+-        # Create agent with template variables for collaboration
+-        extra_vars = {
+-            "agent_id": agent_id if (agents and len(agents) > 1) else None,
+-            "agents": agents if agents else [],
+-            "git_enabled": git_enabled,
+-            "messaging_enabled": messaging_enabled,
+-        }
+-
+-        agent = DefaultAgent(
+-            model=model,
+-            env=env,
+-            comm=comm,
+-            agent_id=agent_id,
+-            **agent_cfg,
+-        )
+-        agent.extra_template_vars.update(extra_vars)
+-        # Auto-refresh of the shared task list between LLM calls when
+-        # team mode is active.  step() picks this up as ``agent.team_poller``.
+-        if team_poller is not None:
+-            agent.team_poller = team_poller
+-
+-        # Run agent
+-        error_msg = None
+-        result = {}
++        if config and config.get("git_network"):
++            env_kwargs["network"] = config["git_network"]
++
++        env = DockerEnvironment(**env_kwargs)
++        error_msg: str | None = None
++        patch = ""
++        status = "Error"
++        agent: DelmDefaultAgent | None = None
++
+         try:
+-            result = agent.run(task=task)
+-            status = result.get("exit_status", "Submitted")
+-        except Exception as e:
+-            status = "Error"
+-            error_msg = str(e)
+-
+-        # The submitted artifact is the agent's PR, not a local file. Reading a local
+-        # patch.txt let an agent submit work it had never shared, so its colleague could not
+-        # see what was coming and the shared remote had nothing to show. The PR is pushed, so
+-        # what gets graded is exactly what the other agent could read.
+-        patch = ""
+-        try:
+-            from cooperbench.agents._coop.runtime import normalize_patch
+-
+-            raw = git_connector.submitted_patch(env)
+-            patch = normalize_patch(raw)
+-        except Exception:
+-            pass
+-
+-        # Save full trajectory (includes segments when compaction occurred)
+-        if log_dir and agent._compaction_count > 0:
+-            traj_path = Path(log_dir) / f"{agent_id}_full_traj.json"
+-            agent.save(traj_path)
+-            logger.info(
+-                f"[{agent_id}] Full trajectory with segments saved to {traj_path} "
+-                f"({agent._compaction_count} compaction(s))"
+-            )
+-
+-        # Cleanup
+-        env.cleanup()
+-
+-        # Tool-calling assistant turns leave content=None (the body lives in
+-        # tool_calls).  CooperBench's downstream conversation extractor does
+-        # ``"send_message" in content`` which raises TypeError on None — coerce
+-        # to "" before returning.
+-        sanitized_messages = []
+-        for msg in agent.messages:
+-            if msg.get("content") is None:
+-                msg = {**msg, "content": ""}
+-            sanitized_messages.append(msg)
+-
++            azure = resolve_azure_config()
++            if azure:
++                model_name = azure_litellm_model(model_name)
++                model_kwargs = dict(model_cfg.get("model_kwargs") or {})
++                model_kwargs.update({"api_base": azure["endpoint"], "api_key": azure["api_key"]})
++                model_cfg["model_kwargs"] = model_kwargs
++            model = LitellmModel(model_name=model_name, **model_cfg)
++
++            git_connector = GitConnector(
++                agent_id=agent_id,
++                agents=agents or [agent_id],
++                server_url=git_server_url if (git_enabled and git_server_url) else "",
++            )
++            git_connector.setup(env)
++
++            f1, f2 = runtime.sorted_features
++            agent = DelmDefaultAgent(
++                model=model,
++                env=env,
++                comm=None,
++                agent_id=agent_id,
++                delm_agent_id=agent_id,
++                **agent_cfg,
++            )
++            agent.extra_template_vars.update(
++                {
++                    "agent_id": agent_id if (agents and len(agents) > 1) else None,
++                    "agents": agents if agents else [],
++                    "git_enabled": git_enabled,
++                    "messaging_enabled": False,
++                    "delm_item1_id": runtime.item_ids["agent1"],
++                    "delm_item2_id": runtime.item_ids["agent2"],
++                    "delm_f1": f1,
++                    "delm_f2": f2,
++                }
++            )
++
++            runtime.mark_session(agent_id, "running")
++            try:
++                result = agent.run(task=task)
++                status = result.get("exit_status", "Submitted")
++            except Exception as exc:
++                status = "Error"
++                error_msg = str(exc)
++            finally:
++                runtime.mark_session(agent_id, "ended")
++
++            try:
++                patch = normalize_patch(git_connector.submitted_patch(env))
++            except Exception:
++                patch = ""
++
++            if agent._compaction_count > 0:
++                traj_path = Path(log_dir) / f"{agent_id}_full_traj.json"
++                agent.save(traj_path)
++                logger.info(
++                    "[%s] Full trajectory saved to %s (%d compaction(s))",
++                    agent_id,
++                    traj_path,
++                    agent._compaction_count,
++                )
++        finally:
++            env.cleanup()
++
++        sanitized_messages = [
++            {**msg, "content": ""} if msg.get("content") is None else msg
++            for msg in (agent.messages if agent is not None else [])
++        ]
+         return AgentResult(
+             status=status,
+             patch=patch,
+-            cost=agent.cost,
+-            steps=agent.n_calls,
++            cost=agent.cost if agent is not None else 0.0,
++            steps=agent.n_calls if agent is not None else 0,
+             messages=sanitized_messages,
+-            sent_messages=agent.sent_messages,
++            sent_messages=agent.sent_messages if agent is not None else [],
+             error=error_msg,
+         )
++
++
++def _load_merged_config(*, is_coop: bool, agent_config: str | None, config: dict[str, Any] | None) -> dict[str, Any]:
++    config_path = get_config_path("coop" if is_coop else "solo")
++    with open(config_path, encoding="utf-8") as f:
++        merged = yaml.safe_load(f) or {}
++    if agent_config:
++        with open(agent_config, encoding="utf-8") as f:
++            overrides = yaml.safe_load(f) or {}
++        merged = recursive_merge(merged, overrides.get("config", overrides))
++    if config is not None:
++        merged = recursive_merge(merged, config)
++    return merged

@@ -20,7 +20,8 @@ This package runs DeLM's unmodified shared-context board (`vendor/delm/board/`) 
 - `tests/test_delm_cb.py`: Unit tests and live two-container Docker integration tests (`openai_tiktoken_task/0` and `go_chi_task/27`).
 - `results/`: Exported per-arm `run.json`, `pairs.csv`, `agents.csv`, `summary.md`, and `results/delm_midpoint_comparison.md`.
 - `demos/delm_showcase.html`: Self-contained 3-pane HTML replay studio comparing DeLM vs. CooperBench push-messaging trajectories across 4 showcase pairs (`15` replays).
-- `demos/cooperbench_to_delm.patch`: Unified diff comparing our DeLM prompt templates, runner adapter, and replay studio UI against upstream `CooperBench` (generated alongside `demos/delm_showcase.html`).
+- `demos/prompt.patch`: Unified diff comparing CooperBench's rendered `coop --git` prompt against `delm_cb.prompts`.
+- `demos/adapter.patch`: Unified diff comparing CooperBench's `mini_swe_agent_v2/adapter.py` against `src/delm_cb/adapter.py` (`vendor/delm/board/` is a 0-diff verbatim copy of `yuzhenmao/DeLM @ 6661761`).
 - `examples/`: Three self-contained curated pair trace walkthroughs (`examples/README.md`).
 
 ## Setup & Usage
@@ -57,7 +58,7 @@ PYTHONPATH=src:vendor/delm "$COOPERBENCH_ROOT/.venv/bin/python" scripts/run_midp
 # Re-export metrics and regenerate results/delm_midpoint_comparison.md
 PYTHONPATH=src:vendor/delm "$COOPERBENCH_ROOT/.venv/bin/python" -m delm_cb.cli report core-ref-delm
 
-# Rebuild the standalone 3-pane HTML replay showcase (demos/delm_showcase.html) and diff patch (demos/cooperbench_to_delm.patch)
+# Rebuild the standalone 3-pane HTML replay showcase (demos/delm_showcase.html) and diff patches (demos/prompt.patch, demos/adapter.patch)
 PYTHONPATH=src:vendor/delm "$COOPERBENCH_ROOT/.venv/bin/python" -m delm_cb.cli showcase
 ```
 
@@ -78,4 +79,4 @@ All 4 Stage-4 Midpoint arms completed with `0` agent errors and `0` board CLI er
 2. **Pull polling and note sparsity degrade weaker / `low`-thinking runs**: At `low` thinking, `gemini-3.8-flash` nearly doubled blocking `read --wait` calls (`1,026` vs. `523` on `medium`, driving steps up from `9,003` to `12,627` and cost from `$48.96` to `$82.13`), while `gemini-3-flash-preview` (`low`) posted only `23` notes across `50` pairs (vs. `216` on `3.8-flash` `medium`), causing `29` git merge conflicts. Across all `160` pairs, `context.sh apply` was invoked only `2` times total.
 3. **Single-line co-edit limits persist across push and pull protocols**: On the `39` non-Click `flash` pairs, `flash-ref-delm` (`medium`) scored `28/39` (`71.8%`), beating `solo` (`27/39`) and every `coop` arm (`25–27/39`). On `pallets_click_task` (`11` pairs), `flash-ref-delm` dropped to `6/11` — reproducing the same `ed.process_priority` post-construction workaround via DeLM `[FACT]` note (`sequence 30` in `examples/flash_pallets_click_2068_f6_f7/`) that passes `git merge` cleanly while breaking `Editor.__init__` mock assertions.
 
-See [`results/delm_midpoint_comparison.md`](results/delm_midpoint_comparison.md) for the full 4-arm comparison and paired win/loss breakdown, [`demos/delm_showcase.html`](demos/delm_showcase.html) for interactive side-by-side trajectory scrubbing across 4 showcase pairs (`15` replays), [`demos/cooperbench_to_delm.patch`](demos/cooperbench_to_delm.patch) for the unified diff relative to upstream CooperBench, and [`examples/README.md`](examples/README.md) for annotated trace walkthroughs.
+See [`results/delm_midpoint_comparison.md`](results/delm_midpoint_comparison.md) for the full 4-arm comparison and paired win/loss breakdown, [`demos/delm_showcase.html`](demos/delm_showcase.html) for interactive side-by-side trajectory scrubbing across 4 showcase pairs (`15` replays), [`demos/prompt.patch`](demos/prompt.patch) and [`demos/adapter.patch`](demos/adapter.patch) for the unified diffs relative to upstream CooperBench, and [`examples/README.md`](examples/README.md) for annotated trace walkthroughs.
