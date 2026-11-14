@@ -27,7 +27,7 @@ from delm_cb.report import (
 from delm_cb.showcase import (
     compile_delm_pair_replay,
     convert_monotonic_to_epoch,
-    export_cooperbench_diff_patches,
+    export_diff_patches,
     patch_replay_html,
 )
 
@@ -777,32 +777,41 @@ def test_showcase_alignment_collapsing_delivery_and_html(tmp_path: Path) -> None
     assert "jumpWaitPollPill" in patched
 
 
-def test_export_cooperbench_diff_patches(tmp_path: Path) -> None:
-    """Verify prompt.patch and adapter.patch are single-purpose unified diffs against CooperBench."""
-    prompt_path, adapter_path = export_cooperbench_diff_patches(
-        prompt_patch_path=tmp_path / "prompt.patch",
-        adapter_patch_path=tmp_path / "adapter.patch",
+def test_export_diff_patches(tmp_path: Path) -> None:
+    """Verify agent prompt, DeLM board prompt, and agent adapter patches are single-purpose diffs."""
+    agent_prompt_path, board_prompt_path, agent_adapter_path = export_diff_patches(
+        agent_prompt_patch_path=tmp_path / "cooperbench_agent_prompt.patch",
+        board_prompt_patch_path=tmp_path / "delm_board_prompt.patch",
+        agent_adapter_patch_path=tmp_path / "cooperbench_agent_adapter.patch",
         cooperbench_root=COOPERBENCH_ROOT,
     )
-    prompt_text = prompt_path.read_text(encoding="utf-8")
-    adapter_text = adapter_path.read_text(encoding="utf-8")
+    agent_prompt_text = agent_prompt_path.read_text(encoding="utf-8")
+    board_prompt_text = board_prompt_path.read_text(encoding="utf-8")
+    agent_adapter_text = agent_adapter_path.read_text(encoding="utf-8")
 
-    assert "--- a/cooperbench/prompts/coop_git_rendered.md" in prompt_text
-    assert "+++ b/delm_cb/prompts/delm_coop_git_rendered.md" in prompt_text
-    assert "## Shared Context Board (DeLM)" in prompt_text
-    assert prompt_text.count("--- a/") == 1
-    assert "adapter.py" not in prompt_text
-    assert "index.html" not in prompt_text
-    assert "centerTabBar" not in prompt_text
+    assert "--- a/cooperbench/prompts/coop_git_rendered.md" in agent_prompt_text
+    assert "+++ b/delm_cb/prompts/delm_coop_git_rendered.md" in agent_prompt_text
+    assert "## Shared Context Board (DeLM)" in agent_prompt_text
+    assert agent_prompt_text.count("--- a/") == 1
+    assert "adapter.py" not in agent_prompt_text
+    assert "prompts_n2_rendered.txt" not in agent_prompt_text
 
-    assert "vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761" in adapter_text
-    assert "--- a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py" in adapter_text
-    assert "+++ b/src/delm_cb/adapter.py" in adapter_text
-    assert '@register("delm_msa_v2")' in adapter_text
-    assert adapter_text.count("--- a/") == 1
-    assert "coop_git_rendered.md" not in adapter_text
-    assert "index.html" not in adapter_text
-    assert "centerTabBar" not in adapter_text
+    assert "--- a/delm/prompts/prompts_n2_rendered.txt" in board_prompt_text
+    assert "+++ b/delm_cb/prompts/shared_context_board_section.md" in board_prompt_text
+    assert "## Shared Context Board (DeLM)" in board_prompt_text
+    assert "-use read --wait 25 (--for ID when known) with yield_time_ms: 30000, reassessing each" in board_prompt_text
+    assert "-Inspect the task and existing files to choose the simplest approach that can satisfy" in board_prompt_text
+    assert board_prompt_text.count("--- a/") == 1
+    assert "adapter.py" not in board_prompt_text
+    assert "coop_git_rendered.md" not in board_prompt_text
+
+    assert "vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761" in agent_adapter_text
+    assert "--- a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py" in agent_adapter_text
+    assert "+++ b/src/delm_cb/adapter.py" in agent_adapter_text
+    assert '@register("delm_msa_v2")' in agent_adapter_text
+    assert agent_adapter_text.count("--- a/") == 1
+    assert "coop_git_rendered.md" not in agent_adapter_text
+    assert "prompts_n2_rendered.txt" not in agent_adapter_text
 
 
 def _start_sleep_container(

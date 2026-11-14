@@ -1,0 +1,141 @@
+# Shared-context board prompt diff: upstream DeLM prompts_n2.py (agent1) vs. delm_cb.prompts.
+# Compares DeLM's worker_prompt output against our pre-claimed ## Shared Context Board (DeLM) section.
+
+--- a/delm/prompts/prompts_n2_rendered.txt
++++ b/delm_cb/prompts/shared_context_board_section.md
+@@ -1,47 +1,10 @@
+-Your task workspace is /workspace/repo. Never inspect credential files or /records. Do not obtain benchmark solutions or hidden tests. Do not access other agents' workspaces. Do not spawn extra agents.
++## Shared Context Board (DeLM)
+ 
+-You are agent1, one of two agents solving this task in parallel. Roster: agent1, agent2.
+-Minimize elapsed time to a correct, complete submission. Start useful work promptly,
+-unblock your peer with usable results, and reuse applicable evidence.
+-Divide work and exchange findings and text files through the board. It is the only
+-connection between workers. Each worker has a separate container, so edits and
+-installs are local. Every worker submits a complete solution from its own workspace.
+-The board is ready immediately. The first worker creates the initial queue: it reserves
+-its own scope, then publishes actionable peer work or states the concrete dependency
+-preventing a split. After that handoff, both can publish, reserve, and claim distinct
+-work. If the first worker ends before the handoff, the other takes over. Both can
+-share findings immediately.
+-The original task remains authoritative for both workers. Queue items divide work;
+-their summaries never replace or weaken its requirements. Preserve every required
+-observable effect, including state changes and nonvisual side effects.
++Both features are already on the board queue and pre-claimed for this session:
++- `agent1` holds item `<item1_id>` for Feature 1
++- `agent2` holds item `<item2_id>` for Feature 2
+ 
+-For performance-constrained work, choose the complete first-call path before fixing
+-component interfaces. In an existing initial item or FACT, state what the producer
+-prepares, what the consumer receives directly, and what substantial work remains on
+-the first required invocation. Retained state is not directly usable if that invocation
+-must rebuild another representation. Design preparation and updates within the task's
+-required lifecycle, preserving fresh-start, mutation and lifetime semantics.
+-
+-For decision or search operations, consider cheap sufficient conditions for exact
+-acceptance and rejection before general preparation or search. An early answer must
+-satisfy every required condition; a heuristic or necessary condition is not enough.
+-Use the complete method when no such condition establishes an answer.
+-
+-Share the interface early and implement independent parts in parallel. When a specific
+-interface cost could prevent a required target, resolve that concern with existing
+-evidence or a small probe before expanding code dependent on that choice. Keep unaffected
+-work moving. Address a measured bottleneck before extending an expensive comparison;
+-reuse compatible components.
+-
+-Your initial work:
+-Inspect the task and existing files to choose the simplest approach that can satisfy
+-all stated requirements and identify complementary, reusable implementation outputs.
+-Read the board and incorporate useful peer findings. Establish the initial split:
+-reserve your scope and publish actionable, nonoverlapping work for your peer, with
+-available inputs, interfaces and the first usable dependency. Do not wait to complete
+-a whole-task plan before publishing useful work and implementing your part in this
+-same session. If no independent item is clear yet, state your scope and the unresolved
+-dependency so your peer can help resolve it. Add remaining work only as needed.
++Run `sh /tools/context.sh read` at startup to inspect the full board, including your colleague's feature specification, status, and any findings or files they share.
+ 
+ Board commands: `sh /tools/context.sh ACTION ...` through your ordinary shell tool.
+ - read [--all] [--wait SECONDS] [--for ID]
+@@ -55,7 +18,7 @@
+     --for names a needed item or publication and returns if it is available already.
+ - publish --items JSON
+     Publish open items as a list of objects with subject and detail, following the
+-    startup roles above. Publishing does not claim ownership. Matching subjects reuse
++    queue rules below. Publishing does not claim ownership. Matching subjects reuse
+     existing items without changing their owner, detail, or completion state.
+     Subject target: 80, detail: 300 characters.
+ - claim --item ID
+@@ -112,7 +75,7 @@
+ Wait only for a specific required input from a starting or running peer when none remains.
+ Name the missing input in status and inspect the returned board view before deciding
+ to wait. Do not batch that response with a blocking wait that hides it. If still needed,
+-use read --wait 25 (--for ID when known) with yield_time_ms: 30000, reassessing each
++use read --wait 25 (--for ID when known), reassessing each
+ returned view before waiting again. Never use sleep, repeated polling, duplicate probes,
+ redundant checks or paperwork to fill the gap. Never wait for an ended peer or a
+ nonrequired addition.
+@@ -153,64 +116,3 @@
+ roles through notes or status. Requests for existing evidence and interface clarification
+ remain useful. Initial planning does not make either worker a permanent coordinator
+ or checker. There is no global plan-closure step.
+-
+-Validation and completion:
+-Derive necessary checks from the original task, not the queue summary or the current
+-implementation. Preserve its measurement domain and apply each stated exception only
+-to the requirement it modifies. Assess your own and peer evidence against those
+-requirements. Reuse applicable results; adoption alone does not require repeating a check.
+-Evidence must match the relevant code, inputs, configuration and environment of the final local output.
+-
+-Before a measurement determines a design choice or a success claim, cover materially
+-different required behaviors and operating conditions. For a decision problem, include
+-valid inputs producing each outcome. Vary input construction and ordering as well as
+-random seed. When behavior depends on a boundary or unit, probe below, at and above it,
+-including complete and partial units. Repeating cases within one regime does not cover
+-another. Report distinct families separately using the task's metric and aggregation.
+-
+-Measure through the actual entry point in the required starting state. Preconstructed
+-state, a substituted service or a warmed path does not establish fresh-start behavior.
+-For performance decisions, record reference and candidate times separately on preserved
+-inputs and matching conditions. Use a cheap breakdown of the complete candidate operation
+-to locate its dominant cost. A slower reference or changed sample is not a candidate
+-improvement. Challenge measurements and input construction before declaring a stated
+-target impossible.
+-
+-For a new comparison, obtain matched candidate and reference observations before
+-collecting repeats. Repeat as required by the task or where uncertainty could change
+-the implementation or acceptance decision, preserving the required starting conditions.
+-Preserve inputs, expected results and reference measurements. After candidate-only changes, rerun
+-affected candidate checks; reuse reference measurements only under matching inputs,
+-reference version, procedure and operating conditions.
+-
+-Extend checking for uncovered requirements, invalidated evidence or new failures,
+-not merely to make an already decisive average more precise. Prioritize an unchecked
+-interaction of combined components over more checks of already-supported components.
+-Extend a costly diagnostic only to resolve a remaining implementation or acceptance
+-question. A passing case does not establish untested requirements.
+-
+-For numerical approximations on inputs available only at execution, use an error
+-estimate or convergence check to choose resolution within the total runtime budget.
+-Refine the source of error that needs it. Pass the remaining budget into expensive
+-refinement and preserve the last complete candidate with its evidence. Partial or
+-unconverged output does not establish success. Easy manufactured cases alone do not
+-justify a fixed setting. Assess threshold margins against timing variation and different
+-valid input constructions. Improve a fragile margin without sacrificing another requirement.
+-
+-Publish an observed relevant failure promptly as FAIL with its conditions. Keep it
+-unresolved until corrected code or a task-based explanation addresses it; changing
+-the sample or averaging it with unrelated cases is not a repair. When ground truth
+-is unavailable, use available references, convergence or invariants and state what
+-remains unmeasured. Never turn that limitation into a claim of measured success.
+-
+-Before submitting, read the board and address published corrections relevant to your
+-final local solution. A required repair is a dependency even if an earlier artifact
+-is usable. Do not finish with a known unresolved failure of a required behavior or
+-performance target. Once applicable evidence supports satisfying all requirements
+-and no relevant failure remains, preserve that candidate and submit. An optional
+-stronger result or an already-running search is not a reason to delay. Prevent
+-exploratory work from changing the submitted output. Close any claim you still hold
+-with done. If your item is already done, publish required corrections in a note rather
+-than opening a claim merely to finish it. Submit a concise answer with required
+-explanations and known limitations.
+-A peer still working does not block a complete local submission.

@@ -17,6 +17,7 @@ from typing import Any
 
 import jinja2
 import yaml
+from prompts import prompts_n2
 
 from delm_cb.prompts import DELM_INSTANCE_TEMPLATE, DELM_SYSTEM_TEMPLATE
 from delm_cb.report import (
@@ -28,18 +29,25 @@ from delm_cb.report import (
 )
 
 DEFAULT_SHOWCASE_HTML = PACKAGE_ROOT / "demos" / "delm_showcase.html"
-DEFAULT_PROMPT_PATCH = PACKAGE_ROOT / "demos" / "prompt.patch"
-DEFAULT_ADAPTER_PATCH = PACKAGE_ROOT / "demos" / "adapter.patch"
+DEFAULT_AGENT_PROMPT_PATCH = PACKAGE_ROOT / "demos" / "cooperbench_agent_prompt.patch"
+DEFAULT_BOARD_PROMPT_PATCH = PACKAGE_ROOT / "demos" / "delm_board_prompt.patch"
+DEFAULT_AGENT_ADAPTER_PATCH = PACKAGE_ROOT / "demos" / "cooperbench_agent_adapter.patch"
 MAX_SHOWCASE_OUTPUT_CHARS = 4_000
 MAX_SHOWCASE_THOUGHT_CHARS = 3_000
 
-_PROMPT_PATCH_HEADER = "\n".join(
+_AGENT_PROMPT_PATCH_HEADER = "\n".join(
     [
-        "# Rendered coop --git prompt diff: CooperBench coop.yaml vs. delm_cb.prompts.",
+        "# Rendered coop --git agent prompt diff: CooperBench coop.yaml vs. delm_cb.prompts.",
         "# Rendered with Jinja2 StrictUndefined under identical workspace settings (messaging_enabled=True vs. False).",
     ]
 )
-_ADAPTER_PATCH_HEADER = "\n".join(
+_BOARD_PROMPT_PATCH_HEADER = "\n".join(
+    [
+        "# Shared-context board prompt diff: upstream DeLM prompts_n2.py (agent1) vs. delm_cb.prompts.",
+        "# Compares DeLM's worker_prompt output against our pre-claimed ## Shared Context Board (DeLM) section.",
+    ]
+)
+_AGENT_ADAPTER_PATCH_HEADER = "\n".join(
     [
         "# Agent runner diff: CooperBench mini_swe_agent_v2/adapter.py vs. src/delm_cb/adapter.py.",
         "# vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761 board/.",
@@ -357,13 +365,14 @@ def export_delm_showcase(
     return out_path
 
 
-def export_cooperbench_diff_patches(
+def export_diff_patches(
     *,
-    prompt_patch_path: Path | str = DEFAULT_PROMPT_PATCH,
-    adapter_patch_path: Path | str = DEFAULT_ADAPTER_PATCH,
+    agent_prompt_patch_path: Path | str = DEFAULT_AGENT_PROMPT_PATCH,
+    board_prompt_patch_path: Path | str = DEFAULT_BOARD_PROMPT_PATCH,
+    agent_adapter_patch_path: Path | str = DEFAULT_AGENT_ADAPTER_PATCH,
     cooperbench_root: Path | str | None = None,
-) -> tuple[Path, Path]:
-    """Write separate unified diffs for rendered prompts and the agent runner adapter against CooperBench."""
+) -> tuple[Path, Path, Path]:
+    """Write unified diffs for CooperBench agent prompt, DeLM board prompt section, and agent adapter."""
     cb_root = Path(cooperbench_root) if cooperbench_root is not None else resolve_cooperbench_root()
 
     coop_yaml_path = cb_root / "src" / "cooperbench" / "agents" / "mini_swe_agent_v2" / "config" / "coop.yaml"
@@ -395,18 +404,39 @@ def export_cooperbench_diff_patches(
         {**base_vars, "messaging_enabled": False},
     )
 
+    upstream_delm_prompt = prompts_n2.worker_prompt(
+        task="",
+        actor="agent1",
+        roster=["agent1", "agent2"],
+        workspace="/workspace/repo",
+    ).lstrip("\n")
+    board_section = _render_shared_board_section(
+        {
+            "delm_item1_id": "<item1_id>",
+            "delm_item2_id": "<item2_id>",
+            "delm_f1": 1,
+            "delm_f2": 2,
+        }
+    )
+
     cb_adapter = (cb_root / "src" / "cooperbench" / "agents" / "mini_swe_agent_v2" / "adapter.py").read_text(
         encoding="utf-8"
     )
     delm_adapter = (PACKAGE_ROOT / "src" / "delm_cb" / "adapter.py").read_text(encoding="utf-8")
 
-    prompt_diff = _unified_diff_section(
+    agent_prompt_diff = _unified_diff_section(
         cb_prompt,
         delm_prompt,
         fromfile="a/cooperbench/prompts/coop_git_rendered.md",
         tofile="b/delm_cb/prompts/delm_coop_git_rendered.md",
     )
-    adapter_diff = _unified_diff_section(
+    board_prompt_diff = _unified_diff_section(
+        upstream_delm_prompt,
+        board_section,
+        fromfile="a/delm/prompts/prompts_n2_rendered.txt",
+        tofile="b/delm_cb/prompts/shared_context_board_section.md",
+    )
+    agent_adapter_diff = _unified_diff_section(
         cb_adapter,
         delm_adapter,
         fromfile="a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py",
@@ -414,21 +444,28 @@ def export_cooperbench_diff_patches(
     )
 
     secret_tokens = _collect_sensitive_tokens(cb_root)
-    prompt_out = _write_sanitized_patch(
-        Path(prompt_patch_path),
-        header=_PROMPT_PATCH_HEADER,
-        diff_body=prompt_diff,
+    agent_prompt_out = _write_sanitized_patch(
+        Path(agent_prompt_patch_path),
+        header=_AGENT_PROMPT_PATCH_HEADER,
+        diff_body=agent_prompt_diff,
         cb_root=cb_root,
         secret_tokens=secret_tokens,
     )
-    adapter_out = _write_sanitized_patch(
-        Path(adapter_patch_path),
-        header=_ADAPTER_PATCH_HEADER,
-        diff_body=adapter_diff,
+    board_prompt_out = _write_sanitized_patch(
+        Path(board_prompt_patch_path),
+        header=_BOARD_PROMPT_PATCH_HEADER,
+        diff_body=board_prompt_diff,
         cb_root=cb_root,
         secret_tokens=secret_tokens,
     )
-    return prompt_out, adapter_out
+    agent_adapter_out = _write_sanitized_patch(
+        Path(agent_adapter_patch_path),
+        header=_AGENT_ADAPTER_PATCH_HEADER,
+        diff_body=agent_adapter_diff,
+        cb_root=cb_root,
+        secret_tokens=secret_tokens,
+    )
+    return agent_prompt_out, board_prompt_out, agent_adapter_out
 
 
 def patch_replay_html(template_html: str) -> str:
@@ -1778,6 +1815,13 @@ def _render_prompt_markdown(
         jinja2.Template(instance_template, undefined=jinja2.StrictUndefined).render(**template_vars).strip()
     )
     return f"# System Prompt\n\n{rendered_sys}\n\n# Instance Prompt\n\n{rendered_inst}\n"
+
+
+def _render_shared_board_section(template_vars: dict[str, Any]) -> str:
+    start_idx = DELM_INSTANCE_TEMPLATE.index("## Shared Context Board (DeLM)")
+    end_idx = DELM_INSTANCE_TEMPLATE.index("{% if git_enabled %}", start_idx)
+    section_template = DELM_INSTANCE_TEMPLATE[start_idx:end_idx]
+    return jinja2.Template(section_template, undefined=jinja2.StrictUndefined).render(**template_vars).strip() + "\n"
 
 
 def _unified_diff_section(

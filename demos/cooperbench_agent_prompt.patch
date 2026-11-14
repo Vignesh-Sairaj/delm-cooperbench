@@ -1,4 +1,4 @@
-# Rendered coop --git prompt diff: CooperBench coop.yaml vs. delm_cb.prompts.
+# Rendered coop --git agent prompt diff: CooperBench coop.yaml vs. delm_cb.prompts.
 # Rendered with Jinja2 StrictUndefined under identical workspace settings (messaging_enabled=True vs. False).
 
 --- a/cooperbench/prompts/coop_git_rendered.md
