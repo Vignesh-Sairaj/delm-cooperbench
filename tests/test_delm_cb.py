@@ -27,6 +27,7 @@ from delm_cb.report import (
 from delm_cb.showcase import (
     compile_delm_pair_replay,
     convert_monotonic_to_epoch,
+    export_cooperbench_diff_patch,
     patch_replay_html,
 )
 
@@ -774,6 +775,31 @@ def test_showcase_alignment_collapsing_delivery_and_html(tmp_path: Path) -> None
     assert "Raw Board View" in patched
     assert "Posted" in patched
     assert "jumpWaitPollPill" in patched
+
+
+def test_export_cooperbench_diff_patch(tmp_path: Path) -> None:
+    """Verify CooperBench-to-DeLM unified diff patch covers prompts, adapter, and UI."""
+    patch_path = export_cooperbench_diff_patch(
+        tmp_path / "cooperbench_to_delm.patch",
+        cooperbench_root=COOPERBENCH_ROOT,
+    )
+    patch_text = patch_path.read_text(encoding="utf-8")
+
+    expected_headers = (
+        "--- a/cooperbench/prompts/coop_git_rendered.md",
+        "+++ b/delm_cb/prompts/delm_coop_git_rendered.md",
+        "--- a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py",
+        "+++ b/src/delm_cb/adapter.py",
+        "--- a/cooperbench/tools/replay_viewer/static/index.html",
+        "+++ b/demos/delm_showcase_template.html",
+    )
+    for header in expected_headers:
+        assert header in patch_text
+
+    assert "vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761" in patch_text
+    assert "## Shared Context Board (DeLM)" in patch_text
+    assert '@register("delm_msa_v2")' in patch_text
+    assert "centerTabBar" in patch_text
 
 
 def _start_sleep_container(

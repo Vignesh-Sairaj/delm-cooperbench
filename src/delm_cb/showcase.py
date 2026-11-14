@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import csv
+import difflib
 import getpass
 import importlib
 import json
@@ -14,6 +15,10 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import jinja2
+import yaml
+
+from delm_cb.prompts import DELM_INSTANCE_TEMPLATE, DELM_SYSTEM_TEMPLATE
 from delm_cb.report import (
     DEFAULT_LOGS_DIR,
     DEFAULT_RESULTS_DIR,
@@ -23,8 +28,22 @@ from delm_cb.report import (
 )
 
 DEFAULT_SHOWCASE_HTML = PACKAGE_ROOT / "demos" / "delm_showcase.html"
+DEFAULT_DIFF_PATCH = PACKAGE_ROOT / "demos" / "cooperbench_to_delm.patch"
 MAX_SHOWCASE_OUTPUT_CHARS = 4_000
 MAX_SHOWCASE_THOUGHT_CHARS = 3_000
+
+_DIFF_PATCH_HEADER = "\n".join(
+    [
+        "# Unified diff summary of adaptations relative to upstream CooperBench (cooperbench/CooperBench @ 63b9d44).",
+        "# vendor/delm/board/ is a 0-diff verbatim copy of yuzhenmao/DeLM @ 6661761 board/.",
+        "#",
+        "# Sections:",
+        "#   1. Rendered Coop + Git Prompts: cooperbench/agents/mini_swe_agent_v2/config/coop.yaml vs. delm_cb.prompts",
+        "#   2. Agent Runner Adapter:         cooperbench/agents/mini_swe_agent_v2/adapter.py vs. src/delm_cb/adapter.py",
+        "#   3. Replay Studio UI Template:    tools/replay_viewer/static/index.html vs. unbundled showcase HTML template",
+        "",
+    ]
+)
 
 _BOARD_VIEW_KINDS = frozenset({"read", "status", "note", "done", "claim", "reserve", "publish", "apply"})
 _BOARD_STATE_KINDS = frozenset({"session", "status", "item", "claim", "reserve", "done", "note", "body"})
@@ -334,6 +353,84 @@ def export_delm_showcase(
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(bundled_html, encoding="utf-8")
+    return out_path
+
+
+def export_cooperbench_diff_patch(
+    output_path: Path | str = DEFAULT_DIFF_PATCH,
+    *,
+    cooperbench_root: Path | str | None = None,
+) -> Path:
+    """Write unified diffs comparing prompt templates, adapter, and replay UI against CooperBench."""
+    cb_root = Path(cooperbench_root) if cooperbench_root is not None else resolve_cooperbench_root()
+
+    coop_yaml_path = cb_root / "src" / "cooperbench" / "agents" / "mini_swe_agent_v2" / "config" / "coop.yaml"
+    coop_cfg = yaml.safe_load(coop_yaml_path.read_text(encoding="utf-8")) or {}
+    agent_cfg = coop_cfg.get("agent") or {}
+
+    base_vars: dict[str, Any] = {
+        "task": "[... task description omitted ...]",
+        "agent_id": "agent1",
+        "agents": ["agent1", "agent2"],
+        "git_enabled": True,
+        "system": "Linux",
+        "release": "6.x",
+        "version": "#1 SMP",
+        "machine": "x86_64",
+        "delm_item1_id": "<item1_id>",
+        "delm_item2_id": "<item2_id>",
+        "delm_f1": 1,
+        "delm_f2": 2,
+    }
+    cb_prompt = _render_prompt_markdown(
+        str(agent_cfg["system_template"]),
+        str(agent_cfg["instance_template"]),
+        {**base_vars, "messaging_enabled": True},
+    )
+    delm_prompt = _render_prompt_markdown(
+        DELM_SYSTEM_TEMPLATE,
+        DELM_INSTANCE_TEMPLATE,
+        {**base_vars, "messaging_enabled": False},
+    )
+
+    cb_adapter = (cb_root / "src" / "cooperbench" / "agents" / "mini_swe_agent_v2" / "adapter.py").read_text(
+        encoding="utf-8"
+    )
+    delm_adapter = (PACKAGE_ROOT / "src" / "delm_cb" / "adapter.py").read_text(encoding="utf-8")
+
+    cb_template = (cb_root / "tools" / "replay_viewer" / "static" / "index.html").read_text(encoding="utf-8")
+    delm_template = patch_replay_html(cb_template)
+
+    sections = [
+        _unified_diff_section(
+            cb_prompt,
+            delm_prompt,
+            fromfile="a/cooperbench/prompts/coop_git_rendered.md",
+            tofile="b/delm_cb/prompts/delm_coop_git_rendered.md",
+        ),
+        _unified_diff_section(
+            cb_adapter,
+            delm_adapter,
+            fromfile="a/cooperbench/src/cooperbench/agents/mini_swe_agent_v2/adapter.py",
+            tofile="b/src/delm_cb/adapter.py",
+        ),
+        _unified_diff_section(
+            cb_template,
+            delm_template,
+            fromfile="a/cooperbench/tools/replay_viewer/static/index.html",
+            tofile="b/demos/delm_showcase_template.html",
+        ),
+    ]
+
+    raw_patch = f"{_DIFF_PATCH_HEADER}\n" + "\n".join(section for section in sections if section)
+    sanitized_patch = _sanitize_payload(
+        raw_patch,
+        cb_root=cb_root,
+        secret_tokens=_collect_sensitive_tokens(cb_root),
+    )
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(sanitized_patch, encoding="utf-8")
     return out_path
 
 
@@ -1672,6 +1769,30 @@ def _compact_replay(
                     f"{thought_text[:max_thought_chars]}\n... [truncated {len(thought_text) - max_thought_chars} chars]"
                 )
     return out
+
+
+def _render_prompt_markdown(
+    system_template: str,
+    instance_template: str,
+    template_vars: dict[str, Any],
+) -> str:
+    rendered_sys = jinja2.Template(system_template, undefined=jinja2.StrictUndefined).render(**template_vars).strip()
+    rendered_inst = (
+        jinja2.Template(instance_template, undefined=jinja2.StrictUndefined).render(**template_vars).strip()
+    )
+    return f"# System Prompt\n\n{rendered_sys}\n\n# Instance Prompt\n\n{rendered_inst}\n"
+
+
+def _unified_diff_section(
+    before_text: str,
+    after_text: str,
+    *,
+    fromfile: str,
+    tofile: str,
+) -> str:
+    before_lines = (before_text.rstrip("\n") + "\n").splitlines(keepends=True)
+    after_lines = (after_text.rstrip("\n") + "\n").splitlines(keepends=True)
+    return "".join(difflib.unified_diff(before_lines, after_lines, fromfile=fromfile, tofile=tofile, n=3))
 
 
 def _collect_sensitive_tokens(cooperbench_root: Path) -> list[str]:
