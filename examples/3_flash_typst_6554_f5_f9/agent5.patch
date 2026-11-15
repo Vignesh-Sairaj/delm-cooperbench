@@ -1,0 +1,91 @@
+diff --git a/crates/typst/src/foundations/str.rs b/crates/typst/src/foundations/str.rs
+index d90b6f20..e0dd35d2 100644
+--- a/crates/typst/src/foundations/str.rs
++++ b/crates/typst/src/foundations/str.rs
+@@ -179,23 +179,74 @@ impl Str {
+     /// Extracts the first grapheme cluster of the string.
+     /// Fails with an error if the string is empty.
+     #[func]
+-    pub fn first(&self) -> StrResult<Str> {
+-        self.0
+-            .graphemes(true)
+-            .next()
+-            .map(Into::into)
+-            .ok_or_else(string_is_empty)
++    pub fn first(
++        &self,
++        /// Number of characters to return as an array. If omitted, returns a single string.
++        #[named]
++        count: Option<usize>,
++    ) -> StrResult<Value> {
++        let mut graphemes = self.0.graphemes(true);
++        if let Some(count) = count {
++            if count == 0 {
++                bail!("count must be at least 1");
++            }
++            let mut array = Array::new();
++            for _ in 0..count {
++                array.push(
++                    graphemes
++                        .next()
++                        .ok_or_else(|| {
++                            let total = self.0.graphemes(true).count();
++                            eco_format!(
++                                "not enough characters (requested {}, but string only has {})",
++                                count, total
++                            )
++                        })?
++                        .into_value(),
++                );
++            }
++            Ok(Value::Array(array))
++        } else {
++            graphemes
++                .next()
++                .map(|s| Value::Str(s.into()))
++                .ok_or_else(string_is_empty)
++        }
+     }
+ 
+     /// Extracts the last grapheme cluster of the string.
+     /// Fails with an error if the string is empty.
+     #[func]
+-    pub fn last(&self) -> StrResult<Str> {
+-        self.0
+-            .graphemes(true)
+-            .next_back()
+-            .map(Into::into)
+-            .ok_or_else(string_is_empty)
++    pub fn last(
++        &self,
++        /// Number of characters to return as an array. If omitted, returns a single string.
++        #[named]
++        count: Option<usize>,
++    ) -> StrResult<Value> {
++        if let Some(count) = count {
++            if count == 0 {
++                bail!("count must be at least 1");
++            }
++            let mut array = Array::new();
++            let graphemes: Vec<_> = self.0.graphemes(true).rev().take(count).collect();
++            if graphemes.len() < count {
++                let total = self.0.graphemes(true).count();
++                bail!(
++                    "not enough characters (requested {}, but string only has {})",
++                    count, total
++                );
++            }
++            for s in graphemes.into_iter().rev() {
++                array.push(s.into_value());
++            }
++            Ok(Value::Array(array))
++        } else {
++            self.0
++                .graphemes(true)
++                .next_back()
++                .map(|s| Value::Str(s.into()))
++                .ok_or_else(string_is_empty)
++        }
+     }
+ 
+     /// Extracts the first grapheme cluster after the specified index. Returns

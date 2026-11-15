@@ -1,0 +1,192 @@
+diff --git a/outlines/processors/base_logits_processor.py b/outlines/processors/base_logits_processor.py
+index 9b4e4fe..81d79c5 100644
+--- a/outlines/processors/base_logits_processor.py
++++ b/outlines/processors/base_logits_processor.py
+@@ -1,9 +1,10 @@
+ """Base class for logits processors."""
+ 
+ from abc import abstractmethod
+-from typing import TypeVar
++from typing import Optional, TypeVar, Union
+ 
+ from outlines.processors.tensor_adapters import (
++    TensorAdapter,
+     TensorAdapterImplementation,
+     tensor_adapters,
+ )
+@@ -20,17 +21,33 @@ class OutlinesLogitsProcessor:
+     tensor library name specified in the constructor, is used to manipulate the
+     tensors using the appropriate library for the model (numpy, torch...).
+     """
+-    tensor_adapter: TensorAdapterImplementation
++    tensor_adapter: Union[TensorAdapterImplementation, TensorAdapter]
+ 
+-    def __init__(self, tensor_library_name: str):
++    def __init__(
++        self,
++        tensor_library_name: str,
++        custom_adapter: Optional[TensorAdapter] = None,
++    ):
+         """
+         Parameters
+         ----------
+         tensor_library_name
+             The name of the library to use to manipulate tensors. Possible
+-            values are "jax", "mlx", "numpy", "tensorflow" and "torch". You
+-            must choose the library that your model is using.
++            values are "jax", "mlx", "numpy", "tensorflow", "torch", and "custom".
++            You must choose the library that your model is using.
++        custom_adapter
++            A custom tensor adapter implementing TensorAdapter interface,
++            required when tensor_library_name="custom".
+         """
++        if tensor_library_name == "custom":
++            if custom_adapter is None:
++                raise ValueError("custom_adapter must be provided when tensor_library_name is 'custom'")
++            self.tensor_adapter = custom_adapter
++            return
++
++        if custom_adapter is not None:
++            raise ValueError("custom_adapter should only be provided when tensor_library_name is 'custom'")
++
+         # Temporary fix as torch raises a warning that can cause can an error
+         # with python 3.12.
+         if tensor_library_name == "torch":
+diff --git a/outlines/processors/tensor_adapters/__init__.py b/outlines/processors/tensor_adapters/__init__.py
+index 8e3afe7..474fe9e 100644
+--- a/outlines/processors/tensor_adapters/__init__.py
++++ b/outlines/processors/tensor_adapters/__init__.py
+@@ -2,6 +2,7 @@
+ 
+ from typing import Union
+ 
++from .base import TensorAdapter
+ from .jax import JAXTensorAdapter
+ from .mlx import MLXTensorAdapter
+ from .numpy import NumpyTensorAdapter
+diff --git a/tests/test_custom_tensor_adapter.py b/tests/test_custom_tensor_adapter.py
+new file mode 100644
+index 0000000..b52ca0a
+--- /dev/null
++++ b/tests/test_custom_tensor_adapter.py
+@@ -0,0 +1,120 @@
++import pytest
++import outlines
++from outlines.backends.xgrammar import XGrammarBackend, XGrammarLogitsProcessor
++from outlines.processors.tensor_adapters.torch import TorchTensorAdapter
++from outlines.processors.tensor_adapters import TensorAdapter
++
++
++class CustomTorchAdapter(TorchTensorAdapter):
++    def __init__(self):
++        super().__init__()
++        self.shape_calls = 0
++
++    def shape(self, tensor):
++        self.shape_calls += 1
++        return super().shape(tensor)
++
++
++def test_custom_tensor_adapter_export():
++    from outlines.processors.tensor_adapters import TensorAdapter
++    assert isinstance(TensorAdapter, type)
++
++
++def test_base_logits_processor_custom():
++    from outlines.processors.base_logits_processor import OutlinesLogitsProcessor
++
++    adapter = CustomTorchAdapter()
++
++    # Valid
++    proc = OutlinesLogitsProcessor("custom", custom_adapter=adapter)
++    assert proc.tensor_adapter is adapter
++
++    # Missing adapter
++    with pytest.raises(
++        ValueError,
++        match="custom_adapter must be provided when tensor_library_name is 'custom'",
++    ):
++        OutlinesLogitsProcessor("custom")
++
++    # Provided adapter with non-custom library
++    with pytest.raises(
++        ValueError,
++        match="custom_adapter should only be provided when tensor_library_name is 'custom'",
++    ):
++        OutlinesLogitsProcessor("torch", custom_adapter=adapter)
++
++
++def test_xgrammar_logits_processor_custom():
++    adapter = CustomTorchAdapter()
++    compiled_grammar = "dummy_grammar"
++
++    # Valid
++    proc = XGrammarLogitsProcessor(
++        compiled_grammar,
++        tensor_library_name="custom",
++        custom_adapter=adapter,
++    )
++    assert proc.tensor_adapter is adapter
++
++    # Missing adapter
++    with pytest.raises(
++        ValueError,
++        match="custom_adapter must be provided when tensor_library_name is 'custom'",
++    ):
++        XGrammarLogitsProcessor(compiled_grammar, tensor_library_name="custom")
++
++    # Provided adapter with non-custom library
++    with pytest.raises(
++        ValueError,
++        match="custom_adapter should only be provided when tensor_library_name is 'custom'",
++    ):
++        XGrammarLogitsProcessor(
++            compiled_grammar,
++            tensor_library_name="torch",
++            custom_adapter=adapter,
++        )
++
++
++def test_xgrammar_backend_custom():
++    import transformers
++
++    model = outlines.from_transformers(
++        transformers.AutoModelForCausalLM.from_pretrained("erwanf/gpt2-mini"),
++        transformers.AutoTokenizer.from_pretrained("erwanf/gpt2-mini"),
++    )
++    backend = XGrammarBackend(model)
++    adapter = CustomTorchAdapter()
++
++    # JSON schema
++    json_schema = '{"type": "object", "properties": {"name": {"type": "string"}}}'
++    proc_json = backend.get_json_schema_logits_processor(
++        json_schema,
++        tensor_library_name="custom",
++        custom_adapter=adapter,
++    )
++    assert proc_json.tensor_adapter is adapter
++
++    # Regex
++    regex = r"[0-9]{3}"
++    proc_regex = backend.get_regex_logits_processor(
++        regex,
++        tensor_library_name="custom",
++        custom_adapter=adapter,
++    )
++    assert proc_regex.tensor_adapter is adapter
++
++    # CFG
++    cfg = 'root ::= "yes" | "no"'
++    proc_cfg = backend.get_cfg_logits_processor(
++        cfg,
++        tensor_library_name="custom",
++        custom_adapter=adapter,
++    )
++    assert proc_cfg.tensor_adapter is adapter
++
++    # Test generation with custom adapter
++    generator = outlines.Generator(model, backend="xgrammar", processor=proc_regex)
++    res = generator("Hello")
++    assert len(res) == 3
++    assert int(res)
++    assert adapter.shape_calls > 0

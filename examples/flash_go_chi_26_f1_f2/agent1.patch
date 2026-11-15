@@ -1,0 +1,44 @@
+diff --git a/mux.go b/mux.go
+index 56fa4d2..f0aa22b 100644
+--- a/mux.go
++++ b/mux.go
+@@ -454,6 +454,9 @@ func (mx *Mux) routeHTTP(w http.ResponseWriter, r *http.Request) {
+ 
+ 	// Find the route
+ 	if _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {
++		for i, key := range rctx.URLParams.Keys {
++			setPathValue(r, key, rctx.URLParams.Values[i])
++		}
+ 		h.ServeHTTP(w, r)
+ 		return
+ 	}
+diff --git a/path_value.go b/path_value.go
+new file mode 100644
+index 0000000..f158425
+--- /dev/null
++++ b/path_value.go
+@@ -0,0 +1,10 @@
++//go:build go1.22
++// +build go1.22
++
++package chi
++
++import "net/http"
++
++func setPathValue(r *http.Request, key, val string) {
++	r.SetPathValue(key, val)
++}
+diff --git a/path_value_fallback.go b/path_value_fallback.go
+new file mode 100644
+index 0000000..5dfac79
+--- /dev/null
++++ b/path_value_fallback.go
+@@ -0,0 +1,8 @@
++//go:build !go1.22
++// +build !go1.22
++
++package chi
++
++import "net/http"
++
++func setPathValue(r *http.Request, key, val string) {}

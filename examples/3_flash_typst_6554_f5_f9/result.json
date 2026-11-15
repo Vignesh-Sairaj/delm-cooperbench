@@ -1,0 +1,93 @@
+{
+  "repo": "typst_task",
+  "task_id": 6554,
+  "features": [
+    5,
+    9
+  ],
+  "setting": "coop",
+  "run_id": "69a5481f",
+  "run_name": "3-flash-ref-low-delm-shard1of4",
+  "agent_framework": "delm_msa_v2",
+  "model": "vertex_ai/gemini-3-flash-preview",
+  "started_at": "2026-11-12T18:17:55.325484",
+  "ended_at": "2026-11-12T18:22:45.911301",
+  "duration_seconds": 290.585817,
+  "agents": {
+    "agent1": {
+      "feature_id": 5,
+      "status": "Submitted",
+      "cost": 0.10944309999999997,
+      "steps": 36,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "patch_lines": 91,
+      "error": null
+    },
+    "agent2": {
+      "feature_id": 9,
+      "status": "Submitted",
+      "cost": 0.12114495000000002,
+      "steps": 38,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "patch_lines": 106,
+      "error": null
+    }
+  },
+  "total_cost": 0.23058805,
+  "total_steps": 74,
+  "messages_sent": 4,
+  "log_dir": "logs/3-flash-ref-low-delm/coop/typst_task/6554/f5_f9",
+  "delm_board": {
+    "total_events": 28,
+    "total_bodies": 2,
+    "board_writes_total": 4,
+    "board_writes_by_actor": {
+      "agent1": 2,
+      "agent2": 2
+    },
+    "by_kind": {
+      "item": 2,
+      "claim": 2,
+      "status": 6,
+      "session": 4,
+      "read": 9,
+      "done": 2,
+      "body": 2,
+      "expand": 1
+    },
+    "by_actor_kind": {
+      "agent1": {
+        "read": 3,
+        "status": 2,
+        "done": 1,
+        "body": 1
+      },
+      "agent2": {
+        "read": 6,
+        "status": 2,
+        "expand": 1,
+        "done": 1,
+        "body": 1
+      }
+    },
+    "commands_by_actor": {
+      "agent1": {
+        "read": 1,
+        "status": 1,
+        "done": 1
+      },
+      "agent2": {
+        "read": 3,
+        "status": 1,
+        "expand": 1,
+        "done": 1
+      }
+    }
+  }
+}

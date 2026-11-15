@@ -1,0 +1,420 @@
+diff --git a/outlines/backends/xgrammar.py b/outlines/backends/xgrammar.py
+index fcb1672..ceb4ef1 100644
+--- a/outlines/backends/xgrammar.py
++++ b/outlines/backends/xgrammar.py
+@@ -1,18 +1,24 @@
+ """Backend class for XGrammar."""
+ 
+-from typing import TYPE_CHECKING
++import logging
++import os
++import threading
++from typing import TYPE_CHECKING, Any, Dict, List, Optional
+ 
+ from outlines.backends.base import BaseBackend
+ from outlines.models import SteerableModel
+ from outlines.models.transformers import Transformers
+ from outlines.processors.base_logits_processor import (
+     OutlinesLogitsProcessor,
+-    TensorType
++    TensorType,
+ )
++from outlines.processors.tensor_adapters import TensorAdapter
+ 
+ if TYPE_CHECKING:
+     from xgrammar.contrib.hf import LogitsProcessor
+ 
++logger = logging.getLogger(__name__)
++
+ 
+ class XGrammarLogitsProcessor(OutlinesLogitsProcessor):
+     """Logits processor for XGrammar.
+@@ -22,32 +28,117 @@ class XGrammarLogitsProcessor(OutlinesLogitsProcessor):
+ 
+     """
+ 
+-    def __init__(self, compiled_grammar: str):
++    def __init__(
++        self,
++        compiled_grammar: str,
++        tensor_library_name: str = "torch",
++        custom_adapter: Optional[TensorAdapter] = None,
++        track_memory_usage: bool = False,
++    ):
+         """
+         Parameters
+         ----------
+         compiled_grammar: str
+             The compiled grammar to use to create the logits processor.
++        tensor_library_name: str
++            The name of the tensor library to use. Defaults to "torch".
++        custom_adapter: Optional[TensorAdapter]
++            Custom tensor adapter, required when tensor_library_name is 'custom'.
++        track_memory_usage: bool
++            Whether to track memory usage during logits processing.
+ 
+         """
++        if tensor_library_name == "custom":
++            if custom_adapter is None:
++                raise ValueError("custom_adapter must be provided when tensor_library_name is 'custom'")
++        elif custom_adapter is not None:
++            raise ValueError("custom_adapter should only be provided when tensor_library_name is 'custom'")
++
+         import xgrammar as xgr
+ 
+         self.xgr = xgr
+         self.compiled_grammar = compiled_grammar
+         self.xgrammar_logits_processor = None
+-        super().__init__("torch")
++        self.track_memory_usage = track_memory_usage
++
++        self._lock = threading.Lock()
++        self._peak_memory_mb: float = 0.0
++        self._total_calls: int = 0
++        self._memory_history: List[float] = []
++
++        super().__init__(tensor_library_name, custom_adapter=custom_adapter)
++
++    def _get_memory_usage(self) -> float:
++        """Retrieve current memory consumption in MB."""
++        try:
++            import psutil
++
++            process = psutil.Process(os.getpid())
++            return process.memory_info().rss / (1024 * 1024)
++        except Exception as e:
++            logger.debug(f"Failed to get memory usage: {e}")
++            return 0.0
++
++    def _update_memory_stats(self, memory_mb: float):
++        """Maintain running memory statistics."""
++        with self._lock:
++            self._total_calls += 1
++            self._memory_history.append(memory_mb)
++            if memory_mb > self._peak_memory_mb:
++                self._peak_memory_mb = memory_mb
++
++            if self._total_calls % 10 == 0:
++                logger.info(
++                    f"Memory stats after {self._total_calls} calls: "
++                    f"current={memory_mb:.2f}MB, peak={self._peak_memory_mb:.2f}MB, "
++                    f"avg={sum(self._memory_history) / len(self._memory_history):.2f}MB"
++                )
++
++    def get_memory_stats(self) -> Dict[str, Any]:
++        """Returns dictionary with memory statistics:
++        - peak_memory_mb: Peak memory usage in MB
++        - total_calls: Total number of process_logits calls
++        - avg_memory_per_call_mb: Average memory usage per call in MB
++        - memory_history: List of memory usage for each call
++        """
++        with self._lock:
++            total_calls = self._total_calls
++            peak_memory = self._peak_memory_mb
++            history = list(self._memory_history)
++            avg_memory = sum(history) / len(history) if history else 0.0
++
++        return {
++            "peak_memory_mb": peak_memory,
++            "total_calls": total_calls,
++            "avg_memory_per_call_mb": avg_memory,
++            "memory_history": history,
++        }
+ 
+     def reset(self):
+         """Reset the logits processor for a new generation."""
+         self.xgrammar_logits_processor = None
++        if self.track_memory_usage:
++            with self._lock:
++                self._peak_memory_mb = 0.0
++                self._total_calls = 0
++                self._memory_history = []
+ 
+     def process_logits(self, input_ids: TensorType, logits: TensorType) -> TensorType:
+         """Bias the logits."""
++        if self.track_memory_usage:
++            _ = self._get_memory_usage()
++
+         if self.xgrammar_logits_processor is None:
+             self.xgrammar_logits_processor = self.xgr.contrib.hf.LogitsProcessor(
+                 self.compiled_grammar
+             )
+-        return self.xgrammar_logits_processor(input_ids, logits) # type: ignore
++        result = self.xgrammar_logits_processor(input_ids, logits)  # type: ignore
++
++        if self.track_memory_usage:
++            after_memory = self._get_memory_usage()
++            self._update_memory_stats(after_memory)
++
++        return result
+ 
+ 
+ class XGrammarBackend(BaseBackend):
+@@ -79,7 +170,11 @@ class XGrammarBackend(BaseBackend):
+         self.grammar_compiler = xgr.GrammarCompiler(tokenizer_info)
+ 
+     def get_json_schema_logits_processor(
+-        self, json_schema: str
++        self,
++        json_schema: str,
++        tensor_library_name: str = "torch",
++        custom_adapter: Optional[TensorAdapter] = None,
++        track_memory_usage: bool = False,
+     ) -> "LogitsProcessor":
+         """Create a logits processor from a JSON schema.
+ 
+@@ -87,6 +182,12 @@ class XGrammarBackend(BaseBackend):
+         ----------
+         json_schema: str
+             The JSON schema to create a logits processor from.
++        tensor_library_name: str
++            The name of the tensor library to use. Defaults to "torch".
++        custom_adapter: Optional[TensorAdapter]
++            Custom tensor adapter, required when tensor_library_name is 'custom'.
++        track_memory_usage: bool
++            Whether to track memory usage during logits processing.
+ 
+         Returns
+         -------
+@@ -97,15 +198,32 @@ class XGrammarBackend(BaseBackend):
+         compiled_grammar = self.grammar_compiler.compile_json_schema(
+             json_schema
+         )
+-        return XGrammarLogitsProcessor(compiled_grammar)
++        return XGrammarLogitsProcessor(
++            compiled_grammar,
++            tensor_library_name=tensor_library_name,
++            custom_adapter=custom_adapter,
++            track_memory_usage=track_memory_usage,
++        )
+ 
+-    def get_regex_logits_processor(self, regex: str) -> "LogitsProcessor":
++    def get_regex_logits_processor(
++        self,
++        regex: str,
++        tensor_library_name: str = "torch",
++        custom_adapter: Optional[TensorAdapter] = None,
++        track_memory_usage: bool = False,
++    ) -> "LogitsProcessor":
+         """Create a logits processor from a regex.
+ 
+         Parameters
+         ----------
+         regex: str
+             The regex to create a logits processor from.
++        tensor_library_name: str
++            The name of the tensor library to use. Defaults to "torch".
++        custom_adapter: Optional[TensorAdapter]
++            Custom tensor adapter, required when tensor_library_name is 'custom'.
++        track_memory_usage: bool
++            Whether to track memory usage during logits processing.
+ 
+         Returns
+         -------
+@@ -114,15 +232,32 @@ class XGrammarBackend(BaseBackend):
+ 
+         """
+         compiled_grammar = self.grammar_compiler.compile_regex(regex)
+-        return XGrammarLogitsProcessor(compiled_grammar)
++        return XGrammarLogitsProcessor(
++            compiled_grammar,
++            tensor_library_name=tensor_library_name,
++            custom_adapter=custom_adapter,
++            track_memory_usage=track_memory_usage,
++        )
+ 
+-    def get_cfg_logits_processor(self, grammar: str) -> "LogitsProcessor":
++    def get_cfg_logits_processor(
++        self,
++        grammar: str,
++        tensor_library_name: str = "torch",
++        custom_adapter: Optional[TensorAdapter] = None,
++        track_memory_usage: bool = False,
++    ) -> "LogitsProcessor":
+         """Create a logits processor from a context-free grammar.
+ 
+         Parameters
+         ----------
+         grammar: str
+             The context-free grammar to create a logits processor from.
++        tensor_library_name: str
++            The name of the tensor library to use. Defaults to "torch".
++        custom_adapter: Optional[TensorAdapter]
++            Custom tensor adapter, required when tensor_library_name is 'custom'.
++        track_memory_usage: bool
++            Whether to track memory usage during logits processing.
+ 
+         Returns
+         -------
+@@ -131,4 +266,9 @@ class XGrammarBackend(BaseBackend):
+ 
+         """
+         compiled_grammar = self.grammar_compiler.compile_grammar(grammar)
+-        return XGrammarLogitsProcessor(compiled_grammar)
++        return XGrammarLogitsProcessor(
++            compiled_grammar,
++            tensor_library_name=tensor_library_name,
++            custom_adapter=custom_adapter,
++            track_memory_usage=track_memory_usage,
++        )
+diff --git a/tests/backends/test_xgrammar_memory.py b/tests/backends/test_xgrammar_memory.py
+new file mode 100644
+index 0000000..a264db1
+--- /dev/null
++++ b/tests/backends/test_xgrammar_memory.py
+@@ -0,0 +1,155 @@
++import pytest
++from unittest.mock import patch, MagicMock
++import transformers
++from outlines.backends.xgrammar import XGrammarLogitsProcessor, XGrammarBackend
++import outlines
++
++
++@pytest.fixture
++def model_transformers():
++    return outlines.from_transformers(
++        transformers.AutoModelForCausalLM.from_pretrained("erwanf/gpt2-mini"),
++        transformers.AutoTokenizer.from_pretrained("erwanf/gpt2-mini"),
++    )
++
++@pytest.fixture
++def json_schema():
++    return (
++        '{"type": "object", "properties": {"name": {"type": "string"}, '
++        + '"age": {"type": "integer"}}, "required": ["name", "age"], '
++        + '"additionalProperties": false}'
++    )
++
++@pytest.fixture
++def regex():
++    return r"[0-9]{3}"
++
++@pytest.fixture
++def cfg():
++    return """
++root ::= answer
++answer ::= "yes" | "no"
++"""
++
++
++def test_memory_tracking_init_default():
++    proc = XGrammarLogitsProcessor("grammar")
++    assert proc.track_memory_usage is False
++    stats = proc.get_memory_stats()
++    assert stats == {
++        "peak_memory_mb": 0.0,
++        "total_calls": 0,
++        "avg_memory_per_call_mb": 0.0,
++        "memory_history": [],
++    }
++
++
++def test_memory_tracking_init_enabled():
++    proc = XGrammarLogitsProcessor("grammar", track_memory_usage=True)
++    assert proc.track_memory_usage is True
++    stats = proc.get_memory_stats()
++    assert stats["total_calls"] == 0
++    assert stats["peak_memory_mb"] == 0.0
++    assert stats["avg_memory_per_call_mb"] == 0.0
++    assert stats["memory_history"] == []
++
++
++def test_process_logits_memory_tracking_disabled():
++    proc = XGrammarLogitsProcessor("grammar", track_memory_usage=False)
++    proc.xgrammar_logits_processor = MagicMock(return_value="output")
++    res = proc.process_logits(None, None)
++    assert res == "output"
++    stats = proc.get_memory_stats()
++    assert stats["total_calls"] == 0
++    assert stats["memory_history"] == []
++
++
++def test_process_logits_memory_tracking_enabled():
++    proc = XGrammarLogitsProcessor("grammar", track_memory_usage=True)
++    proc.xgrammar_logits_processor = MagicMock(return_value="output")
++
++    # Mock _get_memory_usage to return predictable values
++    memory_values = [10.0, 15.0, 20.0, 25.0]
++    with patch.object(proc, "_get_memory_usage", side_effect=memory_values):
++        # Call 1: before takes 10.0, after takes 15.0
++        proc.process_logits(None, None)
++        # Call 2: before takes 20.0, after takes 25.0
++        proc.process_logits(None, None)
++
++    stats = proc.get_memory_stats()
++    assert stats["total_calls"] == 2
++    assert stats["peak_memory_mb"] == 25.0
++    assert stats["avg_memory_per_call_mb"] == (15.0 + 25.0) / 2
++    assert stats["memory_history"] == [15.0, 25.0]
++
++
++def test_memory_tracking_reset():
++    proc = XGrammarLogitsProcessor("grammar", track_memory_usage=True)
++    proc.xgrammar_logits_processor = MagicMock(return_value="output")
++
++    with patch.object(proc, "_get_memory_usage", side_effect=[10.0, 20.0]):
++        proc.process_logits(None, None)
++
++    stats = proc.get_memory_stats()
++    assert stats["total_calls"] == 1
++    assert stats["peak_memory_mb"] == 20.0
++
++    proc.reset()
++    assert proc.xgrammar_logits_processor is None
++    stats_after_reset = proc.get_memory_stats()
++    assert stats_after_reset == {
++        "peak_memory_mb": 0.0,
++        "total_calls": 0,
++        "avg_memory_per_call_mb": 0.0,
++        "memory_history": [],
++    }
++
++
++def test_memory_tracking_graceful_error_handling():
++    proc = XGrammarLogitsProcessor("grammar", track_memory_usage=True)
++    with patch("psutil.Process", side_effect=Exception("psutil error")):
++        mem = proc._get_memory_usage()
++        assert mem == 0.0
++
++
++def test_memory_tracking_logging_every_10_calls(caplog):
++    import logging
++
++    proc = XGrammarLogitsProcessor("grammar", track_memory_usage=True)
++    proc.xgrammar_logits_processor = MagicMock(return_value="output")
++
++    with caplog.at_level(logging.INFO), patch.object(proc, "_get_memory_usage", return_value=50.0):
++        for _ in range(9):
++            proc.process_logits(None, None)
++        assert "Memory stats after 10 calls" not in caplog.text
++
++        proc.process_logits(None, None)
++        assert "Memory stats after 10 calls" in caplog.text
++
++
++def test_backend_methods_accept_track_memory_usage(model_transformers, json_schema, regex, cfg):
++    backend = XGrammarBackend(model_transformers)
++
++    # JSON schema
++    p_json = backend.get_json_schema_logits_processor(json_schema, track_memory_usage=True)
++    assert isinstance(p_json, XGrammarLogitsProcessor)
++    assert p_json.track_memory_usage is True
++
++    # Regex
++    p_regex = backend.get_regex_logits_processor(regex, track_memory_usage=True)
++    assert isinstance(p_regex, XGrammarLogitsProcessor)
++    assert p_regex.track_memory_usage is True
++
++    # CFG
++    p_cfg = backend.get_cfg_logits_processor(cfg, track_memory_usage=True)
++    assert isinstance(p_cfg, XGrammarLogitsProcessor)
++    assert p_cfg.track_memory_usage is True
++
++    # Test generation with tracking
++    generator = outlines.Generator(model_transformers, backend="xgrammar", processor=p_regex)
++    response = generator("Hello, how are you?")
++    assert len(response) == 3
++    stats = p_regex.get_memory_stats()
++    assert stats["total_calls"] > 0
++    assert stats["peak_memory_mb"] > 0.0
++    assert len(stats["memory_history"]) == stats["total_calls"]

@@ -99,31 +99,30 @@ class ShowcasePairSpec:
 
 SHOWCASE_PAIRS: tuple[ShowcasePairSpec, ...] = (
     ShowcasePairSpec(
-        repo="llama_index_task",
-        task_id=17244,
-        features=(5, 6),
-        delm_runs=("core-ref-delm",),
-        cooperbench_runs=(
-            "coop-msa_v2-git-gemini-3-8-flash-core-ref-intents",
-            "coop-msa_v2-git-gemini-3-8-flash-core-ref-delivery-timing",
-            "coop-msa_v2-git-gemini-3-8-flash-core-ref-comm-combined",
-        ),
-    ),
-    ShowcasePairSpec(
-        repo="pallets_click_task",
-        task_id=2068,
-        features=(6, 7),
-        delm_runs=("flash-ref-delm",),
+        repo="go_chi_task",
+        task_id=26,
+        features=(1, 2),
+        delm_runs=("flash-ref-delm", "flash-ref-low-delm"),
         cooperbench_runs=(
             "coop-msa_v2-git-gemini-3-8-flash-flash-ref-intents",
             "coop-msa_v2-git-gemini-3-8-flash-flash-ref-delivery-timing",
-            "coop-msa_v2-git-gemini-3-8-flash-flash-ref-comm-combined",
+            "coop-msa_v2-git-gemini-3-8-flash-flash-ref-low-intents",
         ),
     ),
     ShowcasePairSpec(
-        repo="pallets_click_task",
-        task_id=2068,
-        features=(1, 6),
+        repo="huggingface_datasets_task",
+        task_id=3997,
+        features=(2, 4),
+        delm_runs=("flash-ref-delm", "flash-ref-low-delm"),
+        cooperbench_runs=(
+            "coop-msa_v2-git-gemini-3-8-flash-flash-ref-intents",
+            "coop-msa_v2-git-gemini-3-8-flash-flash-ref-delivery-timing",
+        ),
+    ),
+    ShowcasePairSpec(
+        repo="dottxt_ai_outlines_task",
+        task_id=1706,
+        features=(5, 8),
         delm_runs=("flash-ref-delm", "flash-ref-low-delm"),
         cooperbench_runs=(
             "coop-msa_v2-git-gemini-3-8-flash-flash-ref-intents",
@@ -131,13 +130,13 @@ SHOWCASE_PAIRS: tuple[ShowcasePairSpec, ...] = (
         ),
     ),
     ShowcasePairSpec(
-        repo="openai_tiktoken_task",
-        task_id=0,
-        features=(6, 8),
-        delm_runs=("3-flash-ref-low-delm",),
+        repo="typst_task",
+        task_id=6554,
+        features=(5, 9),
+        delm_runs=("flash-ref-delm", "3-flash-ref-low-delm"),
         cooperbench_runs=(
+            "coop-msa_v2-git-gemini-3-8-flash-flash-ref-intents",
             "coop-msa_v2-git-gemini-3-flash-flash-ref-low",
-            "coop-msa_v2-git-gemini-3-flash-flash-ref-low-delivery-timing",
         ),
     ),
 )
@@ -259,7 +258,7 @@ def export_delm_showcase(
     max_output_chars: int = MAX_SHOWCASE_OUTPUT_CHARS,
     max_thought_chars: int = MAX_SHOWCASE_THOUGHT_CHARS,
 ) -> Path:
-    """Compile and export the self-contained 15-replay DeLM vs. CooperBench HTML showcase."""
+    """Compile and export the self-contained 17-replay DeLM vs. CooperBench HTML showcase."""
     cb_root = Path(cooperbench_root) if cooperbench_root is not None else resolve_cooperbench_root()
     compiler = _load_cooperbench_compiler(cb_root)
     d_logs = Path(delm_logs_dir) if delm_logs_dir is not None else DEFAULT_LOGS_DIR

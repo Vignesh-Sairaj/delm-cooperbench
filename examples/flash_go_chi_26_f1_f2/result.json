@@ -1,0 +1,97 @@
+{
+  "repo": "go_chi_task",
+  "task_id": 26,
+  "features": [
+    1,
+    2
+  ],
+  "setting": "coop",
+  "run_id": "be367dc1",
+  "run_name": "flash-ref-delm-shard3of4",
+  "agent_framework": "delm_msa_v2",
+  "model": "vertex_ai/gemini-3.8-flash",
+  "started_at": "2026-11-12T11:08:11.844976",
+  "ended_at": "2026-11-12T11:23:19.185474",
+  "duration_seconds": 907.340498,
+  "agents": {
+    "agent1": {
+      "feature_id": 1,
+      "status": "Submitted",
+      "cost": 1.0526366999999999,
+      "steps": 93,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "patch_lines": 44,
+      "error": null
+    },
+    "agent2": {
+      "feature_id": 2,
+      "status": "Submitted",
+      "cost": 0.8371809749999999,
+      "steps": 80,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "patch_lines": 444,
+      "error": null
+    }
+  },
+  "total_cost": 1.8898176749999998,
+  "total_steps": 173,
+  "messages_sent": 6,
+  "log_dir": "logs/flash-ref-delm/coop/go_chi_task/26/f1_f2",
+  "delm_board": {
+    "total_events": 41,
+    "total_bodies": 0,
+    "board_writes_total": 6,
+    "board_writes_by_actor": {
+      "agent1": 3,
+      "agent2": 3
+    },
+    "by_kind": {
+      "item": 2,
+      "claim": 2,
+      "status": 6,
+      "session": 4,
+      "read": 20,
+      "note": 2,
+      "wait": 3,
+      "done": 2
+    },
+    "by_actor_kind": {
+      "agent1": {
+        "read": 11,
+        "status": 2,
+        "note": 1,
+        "wait": 2,
+        "done": 1
+      },
+      "agent2": {
+        "read": 9,
+        "status": 2,
+        "note": 1,
+        "done": 1,
+        "wait": 1
+      }
+    },
+    "commands_by_actor": {
+      "agent1": {
+        "read": 8,
+        "status": 1,
+        "note": 1,
+        "wait": 2,
+        "done": 1
+      },
+      "agent2": {
+        "read": 5,
+        "status": 1,
+        "note": 1,
+        "done": 1,
+        "wait": 1
+      }
+    }
+  }
+}
